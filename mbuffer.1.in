@@ -53,12 +53,15 @@ log messages to \fIfile\fP instead of standard error output
 .TP 
 \fB\-u\fR <\fInum\fP>
 pause \fInum\fP microseconds after each write \- might increase performance on some drives with very low performace (< 1 MB/sec)
+.TP
+\fB\-a\fR <\fItime\fP>
+used device is an autoloader which takes \fItime\fP seconds to load a new tape
 .TP 
 \fB\-f\fR
 overwrite output file if it exists already
 .TP 
 \fB\-v\fR <\fInum\fP>
-set verbose level to \fInum\fP (valid values are 0..5, 0 = none, 5 = all, even debugging informations)
+set verbose level to \fInum\fP. Valid values are 0..5 (0 = none, 1 = errors, 2 = warnings, 4 = informations, 5 = debugging informations). Higher values include lower values messages.
 .TP 
 \fB\-q\fR
 quiet \- do not display the status on the standard error output

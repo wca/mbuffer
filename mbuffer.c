@@ -29,7 +29,7 @@ int Sock = 0;
 pthread_t Reader, Writer;
 int Verbose = 3, Finish = 0, In, Out, Tmp, Rest = 0, Pause = 0, 
 	Memmap = 0, Status = 1, Outsize = 10240, Nooverwrite = O_EXCL, 
-	Numblocks = 256, Outblocksize = 0;
+	Numblocks = 256, Outblocksize = 0, Autoloader = 0;
 unsigned long long Blocksize = 10240, Numin = 0, Numout = 0;
 float Start = 0;
 char *Tmpfile = 0, **Buffer;
@@ -196,13 +196,23 @@ void statusThread()
 #ifdef MULTIVOLUME
 void requestInputVolume()
 {
+	char cmd[15+strlen(Infile)];
+
 	debugmsg("requesting new volume for input\n");
 	close(In);
 	do {
-		fprintf(Terminal,"\ninsert next volume and press return to continue...");
-		fflush(Terminal);
-		tcflush(fileno(Terminal),TCIFLUSH);
-		fgetc(Terminal);
+		if ((Autoloader) && (Infile)) {
+			infomsg("requesting change of volume...\n");
+			sprintf(cmd,"mt -f %s offline",Infile);
+			system(cmd);
+			infomsg("waiting for drive to get ready...\n");
+			sleep(Autoloader);
+		} else {
+			fprintf(Terminal,"\ninsert next volume and press return to continue...");
+			fflush(Terminal);
+			tcflush(fileno(Terminal),TCIFLUSH);
+			fgetc(Terminal);
+		}
 		if (-1 == (In = open(Infile,O_RDONLY)))
 			errormsg("could not reopen input: %s\n",strerror(errno));
 	} while (In == -1);
@@ -273,6 +283,8 @@ void inputThread()
 #ifdef MULTIVOLUME
 void requestOutputVolume()
 {
+	char cmd[15+strlen(Outfile)];
+
 	if (!Outfile) {
 		errormsg("End of volume, but not end of input:\n"
 			"Output file must be given (option -o) for multi volume support!\n");
@@ -281,11 +293,20 @@ void requestOutputVolume()
 	}
 	debugmsg("requesting new output volume\n");
 	close(Out);
-	fprintf(Terminal,"\nWARNING: multivolume is known to be buggy in some situations...\n"
-			"volume full - insert new media and press return whe ready...\n");
-	tcflush(fileno(Terminal),TCIFLUSH);
-	fgetc(Terminal);
-	fprintf(Terminal,"\nOK - continuing...\n");
+	warningmsg("multivolume is known to be buggy in some situations...\n");
+	if ((Autoloader) && (Outfile)) {
+		infomsg("requesting change of volume...\n");
+		sprintf(cmd,"mt -f %s offline",Outfile);
+		system(cmd);
+		infomsg("waiting for drive to get ready...\n");
+		sleep(Autoloader);
+	} else {
+		fprintf(Terminal,"\nvolume full - insert new media and press return whe ready...\n");
+		tcflush(fileno(Terminal),TCIFLUSH);
+		fgetc(Terminal);
+		fprintf(Terminal,"\nOK - continuing...\n");
+	}
+	infomsg("continuing with next volume\n");
 	if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|O_SYNC,0666))) {
 		errormsg("error reopening output file: %s\n",strerror(errno));
 		Finish = 1;
@@ -341,7 +362,7 @@ void outputThread()
 		do {
 			/* use Outsize which could be the blocksize of the device (option -d) */
 			err = write(Out,Buffer[at] + Blocksize - rest, rest > Outsize ? Outsize : rest);
-			debugmsg("outputThread: write(Out, Buffer[%i] + %i, %i) = %i\t(rest = %i)\n", at, Blocksize - rest, rest > Outsize ? Outsize : rest, err, rest);
+			debugmsg("outputThread: write(Out, Buffer[%i] + %Lu, %i) = %i\t(rest = %i)\n", at, Blocksize - rest, rest > Outsize ? Outsize : rest, err, rest);
 #ifdef MULTIVOLUME
 			if ((-1 == err) && (Terminal) && ((errno == ENOMEM) || (errno == ENOSPC))) {
 				/* request a new volume - but first check
@@ -355,6 +376,7 @@ void outputThread()
 #endif
 				errormsg("outputThread: error writing: %s\n",strerror(errno));
 				Finish = 1;
+				sem_post(&Dev2Buf);
 				pthread_exit((void *) -1);
 			}
 			rest -= err;
@@ -451,12 +473,9 @@ void getNetVars(const char **argv, int *c, const char **server, unsigned short *
 		return;
 	}
 	free((void *) tmpserv);
-	if (0 != (*port = atoi(argv[*c]))) {
-		(*c)++;
+	if (0 != (*port = atoi(argv[*c])))
 		return;
-	}
 	*server = argv[*c];
-	(*c)++;
 	*port = atoi(argv[*c]);
 	if (*port)
 		(*c)++;
@@ -502,6 +521,7 @@ void usage()
 		"-l <file>  : use <file> for logging messages\n"
 		"-u <num>   : pause <num> microseconds after each write\n"
 		"-f         : overwrite existing files\n"
+		"-a <time>  : autoloader which needs <time> seconds to reload\n"
 		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"
 		"-q         : quiet - do not display the status on stderr\n"
 		"--version  : print version information\n\n"
@@ -631,10 +651,14 @@ int main(int argc, const char **argv)
 #endif
 		} else if (!strcmp("-f",argv[c])) {
 			Nooverwrite = 0;
-			debugmsg("overwrite set to 0\n");
+			debugmsg("Nooverwrite set to 0\n");
 		} else if (!strcmp("-q",argv[c])) {
 			debugmsg("disabling display of status\n");
 			Status = 0;
+		} else if (!argcheck("-a",argv,&c)) {
+			Autoloader = atoi(argv[c]);
+			debugmsg("Autoloader time set to %i\n",Autoloader);
+			warningmsg("This is an untested feature. Report wheather it works or it will be removed!\n");
 		} else if (!argcheck("-p",argv,&c)) {
 			if (1 != sscanf(argv[c],"%f",&Start))
 				Start = 0;
@@ -664,6 +688,9 @@ int main(int argc, const char **argv)
 		Blocksize = totalmem / Numblocks;
 		infomsg("blocksize set to %Lu\n",Blocksize);
 	}
+	if (Autoloader)
+		if ((!Outfile) && (!Infile))
+			fatal("Setting autoloader time without using a device doesn't make any sense!\n");
 #ifdef EXPERIMENTAL
 	if (Infile && netPortIn)
 		fatal("Setting both network input port and input file doesn't make sense!\n");
@@ -750,11 +777,11 @@ int main(int argc, const char **argv)
 	debugmsg("checking output device...\n");
 	if (-1 == fstat(Out,&st))
 		fatal("could not stat output: %s\n",strerror(errno));
-	if ((st.st_mode & S_IFBLK) || (st.st_mode & S_IFCHR)) {
+	if (S_ISBLK(st.st_mode) || S_ISCHR(st.st_mode)) {
 		infomsg("blocksize is %i bytes on output device\n",st.st_blksize);
 		if (Blocksize%st.st_blksize != 0)
 			warningmsg("Blocksize should be a multiple of the blocksize of the output device (is %i)!\n"
-				   "This can cause corrupt data when writing to mulple volumes...\n",st.st_blksize);
+				   "This can cause corrupt data when writing to multiple volumes...\n",st.st_blksize);
 		Outblocksize = st.st_blksize;
 		if ((setOutsize) && (Blocksize > st.st_blksize)) {
 			infomsg("setting output blocksize to %i\n",st.st_blksize);

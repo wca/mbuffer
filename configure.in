@@ -8,7 +8,7 @@ test "$prefix" = NONE && prefix=/usr/local
 test "$exec_prefix" = NONE && exec_prefix=$prefix
 
 PACKAGE=mbuffer
-VERSION=20010703
+VERSION=20010704
 
 AC_DEFINE_UNQUOTED(VERSION,"${VERSION}")
 AC_SUBST(VERSION)

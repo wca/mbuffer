@@ -17,6 +17,7 @@ mbuffer is a raplacement for buffer with additional functionality:
 # optional use of memory mapped i/o for huge buffers
 # multithreaded instead of sharedmemory ipc
 # multi-volume support
+# auto-loader support (TEST IT!)
 # compatible command-line options
 # --? bugs to hunt ?-- :-((
 

@@ -1,3 +1,10 @@
+20010704:
+- fixed possible termination hang on write error
+- fixed debugmessage for input thread
+- added support for autoloaders
+- update for experimental networking code
+- docu update
+
 20010703:
 - update for debug messages
 - update for experimental network code
