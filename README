@@ -38,6 +38,5 @@ This software has been tested under the following operatingsystems:
 
 TODO:
 =====
-# fix: show status on tru64 and solaris
 # fix: warnings for tru64 compilation
 # fix: unknown bugs

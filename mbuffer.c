@@ -75,6 +75,8 @@ void fatal(const char *msg, ...)
 void terminate()
 {
 	infomsg("\rterminating...\n");
+	if (Status)
+		fprintf(stderr,"\n");
 	pthread_cancel(Reader);
 	pthread_cancel(Writer);
 	remove(Tmpfile);
@@ -95,10 +97,9 @@ RETSIGTYPE sigHandler(int signr)
 
 void statusThread() 
 {
-	int rest, total;
 	struct timeb last, now;
 	float in = 0, out = 0, diff, fill;
-	int lin = 0, lout = 0;
+	int total, rest, lin = 0, lout = 0;
 
 	ftime(&last);
 	usleep(1000);	// needed on alpha (stderr fails with fpe on nan)
@@ -115,7 +116,7 @@ void statusThread()
 		lout = Numout;
 		last.time = now.time;
 		last.millitm = now.millitm;
-		total = (Numout*Blocksize)>>10;
+		total = ((long long)Numout * Blocksize) >> 10;
 		fprintf(stderr,"\rin at %8.1f kB/sec - out at %8.1f kB/sec - %i kB totally transfered - buffer %3.0f%% full",in,out,total,fill);
 		fflush(Log);
 		usleep(500000);
@@ -200,7 +201,8 @@ void outputThread()
 		do {
 			debugmsg("outputThread: write %i\n",-num);
 			err = write(Out,Buffer[at++] + num, Outsize > rest ? Outsize : rest );
-			usleep(Pause);
+			if (Pause)
+				usleep(Pause);
 			if (-1 == err) {
 				errormsg("outputThread: error writing: %s\n",strerror(errno));
 				Finish = 1;

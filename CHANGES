@@ -1,3 +1,10 @@
+20010426:
+- Bugfix: fixed sleep, which limited the performace to 1MB/s
+          (credits go to Padraig Brady <padraig@antefacto.com>)
+- Bugfix: fixed incorrect display of total datatransfer for >2GB
+- cosmetic: on sighup print newline on stderr
+- added manpage
+
 20010208:
 - Bugfix: option -p did not work
 - reworked option flags (-h is now -t, -t is now -T)
