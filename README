@@ -1,4 +1,4 @@
-m(easuring)buffer version 20010118
+m(easuring)buffer version 20010208
 ==================================
 AUTHOR: Thomas Maier-Komor
 e-mail: software@maier-komor.de
@@ -40,7 +40,4 @@ TODO:
 =====
 # fix: show status on tru64 and solaris
 # fix: warnings for tru64 compilation
-# if the need comes up (mail me) the outputThread should
-  be modified to do write's with the favorite size of
-  the output device
 # fix: unknown bugs

@@ -15,7 +15,7 @@
 
 pthread_t Reader, Writer;
 int Verbose = 3, Finish = 0, In, Out, Tmp, Rest = 0, Numin = 0,
-    Numout = 0, Pause = 0, Memmap = 0, Status = 1;
+    Numout = 0, Pause = 0, Memmap = 0, Status = 1, Outsize = 0;
 float Start = 0;
 char *Tmpfile = 0;
 char **Buffer;
@@ -170,16 +170,17 @@ void inputThread()
 
 void outputThread()
 {
-	int at = 0, err, fill, num;
+	int at = 0, err, fill, num, rest;
 	
-	if (Start)
-		debugmsg("outputThread: waiting for buffer...\n");
-	while (((float) fill / (float) Numblocks) < Start) {
-		usleep(100000);
-		sem_getvalue(&Buf2Dev,&fill);
+	if (Start) {
+		infomsg("outputThread: waiting for buffer...\n");
+		while (((float) fill / (float) Numblocks) < Start) {
+			usleep(100000);
+			sem_getvalue(&Buf2Dev,&fill);
+		}
 	}
 	fill = -1;
-	infomsg("outputThread: starting...\n");
+	infomsg("\noutputThread: starting...\n");
 	while (1) {
 		debugmsg("outputThread: wait\n");
 		sem_wait(&Buf2Dev);
@@ -195,17 +196,18 @@ void outputThread()
 				Blocksize = Rest;
 			}
 		}
+		rest = Blocksize;
 		do {
 			debugmsg("outputThread: write %i\n",-num);
-			err = write(Out,Buffer[at++] + num,Blocksize - num);
+			err = write(Out,Buffer[at++] + num, Outsize > rest ? Outsize : rest );
 			usleep(Pause);
 			if (-1 == err) {
 				errormsg("outputThread: error writing: %s\n",strerror(errno));
 				Finish = 1;
 				pthread_exit((void *) -1);
 			}
-			num += err;
-		} while (num < Blocksize);
+			rest -= err;
+		} while (rest > 0);
 		if (Finish && (0 == fill)) {
 			infomsg("outputThread: finished - exiting...\n");
 			close(Out);
@@ -259,12 +261,12 @@ void usage()
 		"-s <size>  : use block of <size> bytes for buffer (default %i)\n"\
 		"-m <size>  : use buffer of a total of <size> bytes\n"
 #ifdef HAVE_MMAP
-		"-h         : use memory mapped i/o for huge buffer\n"
+		"-t         : use memory mapped file (for huge buffer)\n"
 #endif
 		"-p <num>   : start writing after buffer has been filled <num>%%\n"\
 		"-i <file>  : use <file> for input\n"\
 		"-o <file>  : use <file> for output\n"\
-		"-t <file>  : use <file> as buffer (implies -m)\n"\
+		"-T <file>  : as -t but uses <file> as buffer\n"\
 		"-l <file>  : use <file> for logging messages\n"\
 		"-u <num>   : pause <num> microseconds after each write\n"\
 		"-f         : overwrite existing files\n"\
@@ -319,6 +321,9 @@ int main(int argc, char **argv)
 	int c, nooverwrite = O_EXCL, totalmem = 0;
 	const char *inFile = 0, *outFile = 0;
 	int optMset = 0, optSset = 0, optBset = 0;
+#ifdef HAVE_ST_BLKSIZE
+	struct stat st;
+#endif
 	
 	Log = stderr;
 	for (c = 1; c < argc; c++) {
@@ -346,7 +351,7 @@ int main(int argc, char **argv)
 		} else if (!argcheck("-o",argv,&c)) {
 			outFile = argv[c];
 			debugmsg("outFile set to %s\n",outFile);
-		} else if (!argcheck("-t",argv,&c)) {
+		} else if (!argcheck("-T",argv,&c)) {
 			Tmpfile = argv[c];
 			Memmap = 1;
 			debugmsg("Tmpfile set to %s\n",Tmpfile);
@@ -358,7 +363,7 @@ int main(int argc, char **argv)
 			}
 			debugmsg("logFile set to %s\n",argv[c]);
 #ifdef HAVE_MMAP
-		} else if (!strcmp("-h",argv[c])) {
+		} else if (!strcmp("-t",argv[c])) {
 			Memmap = 1;
 			debugmsg("mm set to 1\n");
 #endif
@@ -371,6 +376,7 @@ int main(int argc, char **argv)
 		} else if (!argcheck("-p",argv,&c)) {
 			if (1 != sscanf(argv[c],"%f",&Start))
 				Start = 0;
+			Start /= 100;
 			debugmsg("Start set to %f%%\n",Start);
 		} else if (!strcmp("--help",argv[c])) {
 			usage();
@@ -441,9 +447,22 @@ int main(int argc, char **argv)
 		In = fileno(stdin);
 	if (outFile) {
 		if (-1 == (Out = open(outFile,nooverwrite|O_CREAT|O_WRONLY|O_TRUNC,0666)))
-			fatal("could not open output file: %s\n",strerror(errno));
+			perror("could not open output file");
 	} else
 		Out = fileno(stdout);
+
+#ifdef HAVE_ST_BLKSIZE
+	infomsg("checking blocksize for output");
+	if (-1 == stat(Out,&st))
+		perror("could not stat output");
+	debugmsg("blocksize on output stream is %i\n",st.st_blksize);
+	if (Blocksize%st.st_blksize != 0)
+		warningmsg("Blocksize should be a multiple of the blocksize of the output stream (is %i)!",st.st_blksize);
+	if (Blocksize != st.st_blksize) {
+		infomsg("setting output blocksize to %i\n",st.st_blksize);
+		Outsize = st.st_blksize;
+	}
+#endif
 
 	debugmsg("registering signals...\n");
 	signal(SIGINT,sigHandler);

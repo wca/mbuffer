@@ -1,3 +1,9 @@
+20010208:
+- Bugfix: option -p did not work
+- reworked option flags (-h is now -t, -t is now -T)
+- output is now done with the blocksize of the output stream
+  otherwise direct writing to a tape device failed under Linux
+
 20010124:
 - Bugfix: outputThread terminated too early in certain cases
 - Fix for correct termination if an error occured
