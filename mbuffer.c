@@ -1,6 +1,7 @@
 #include "config.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <libintl.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <signal.h>
@@ -14,6 +15,7 @@
 #include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
+
 
 #ifdef NETWORKING
 #include <sys/types.h>
@@ -70,7 +72,7 @@ void warningmsg(const char *msg, ...)
 	if (Verbose < 3)
 		return;
 	va_start(val,msg);
-	fprintf(Log,"warning: ");
+	fprintf(Log,gettext("warning: "));
 	vfprintf(Log,msg,val);
 	va_end(val);
 }
@@ -82,7 +84,7 @@ void errormsg(const char *msg, ...)
 	if (Verbose < 2)
 		return;
 	va_start(val,msg);
-	fprintf(Log,"error: ");
+	fprintf(Log,gettext("error: "));
 	vfprintf(Log,msg,val);
 	va_end(val);
 }
@@ -95,7 +97,7 @@ void fatal(const char *msg, ...)
 	if (Verbose < 1)
 		return;
 	va_start(val,msg);
-	fprintf(Log,"fatal: ");
+	fprintf(Log,gettext("fatal: "));
 	vfprintf(Log,msg,val);
 	va_end(val);
 	exit(-1);
@@ -106,7 +108,7 @@ void terminate()
 	float diff,out;
 	struct timeb now;
 
-	infomsg("\rterminating...\n");
+	infomsg(gettext("\rterminating...\n"));
 	pthread_cancel(Reader);
 	pthread_cancel(Writer);
 
@@ -124,7 +126,7 @@ void terminate()
 		ftime(&now);
 		diff = now.time - Starttime.time + (float) now.millitm / 1000 - (float) Starttime.millitm / 1000;
 		out = (float)((Numout * Blocksize) >> 10) / diff;
-		fprintf(Terminal,"\nsummary: %Lu kB in %.1f sec - %.1f kB/sec average\n",
+		fprintf(Terminal,gettext("\nsummary: %Lu kB in %.1f sec - %.1f kB/sec average\n"),
 			(Numout * Blocksize) >> 10,
 			diff, out );
 	}
@@ -135,11 +137,11 @@ RETSIGTYPE sigHandler(int signr)
 {
 	switch (signr) {
 	case SIGINT:
-		infomsg("\rcatched INT signal...\n");
+		infomsg(gettext("\rcatched INT signal...\n"));
 		terminate();
 		break;
 	case SIGTERM:
-		infomsg("\rcatched TERM signal...\n");
+		infomsg(gettext("\rcatched TERM signal...\n"));
 		terminate();
 		break;
 	}
@@ -171,13 +173,13 @@ void statusThread()
 		last.millitm = now.millitm;
 		total = (Numout * Blocksize) >> 10;
 		fill = (fill < 0) ? 0 : fill;
-		fprintf(Terminal,"\r%8.1f kB/s in - %8.1f kB/s out - %Lu kB total - buffer %3.0f%% full",in,out,total,fill);
+		fprintf(Terminal,gettext("\r%8.1f kB/s in - %8.1f kB/s out - %Lu kB total - buffer %3.0f%% full"),in,out,total,fill);
 		fflush(Terminal);
 		usleep(500000);
 		sem_getvalue(&Buf2Dev,&rest);
 	}
 	fprintf(stderr,"\n");
-	infomsg("statusThread: joining to terminate...\n");
+	infomsg(gettext("statusThread: joining to terminate...\n"));
 	pthread_join(Reader,0);
 	pthread_join(Writer,0);
 	if (Memmap)
@@ -187,7 +189,7 @@ void statusThread()
 	ftime(&now);
 	diff = now.time - Starttime.time + (float) now.millitm / 1000 - (float) Starttime.millitm / 1000;
 	out = (float)((Numout * Blocksize) >> 10) / diff;
-	fprintf(Terminal,"summary: %Lu kB in %.1f sec - %.1f kB/sec average\n",
+	fprintf(Terminal,gettext("summary: %Lu kB in %.1f sec - %.1f kB/sec average\n"),
 		(Numout * Blocksize) >> 10,
 		diff, out);
 	exit(0);
@@ -198,30 +200,30 @@ void requestInputVolume()
 {
 	char cmd[15+strlen(Infile)];
 
-	debugmsg("requesting new volume for input\n");
+	debugmsg(gettext("requesting new volume for input\n"));
 	close(In);
 	do {
 		if ((Autoloader) && (Infile)) {
-			infomsg("requesting change of volume...\n");
+			infomsg(gettext("requesting change of volume...\n"));
 			sprintf(cmd,"mt -f %s offline",Infile);
 			if (-1 == system(cmd)) {
-				warningmsg("error executing mt to change volume in autoloader...\n");
+				warningmsg(gettext("error executing mt to change volume in autoloader...\n"));
 				Autoloader = 0;
 				continue;
 			}
-			infomsg("waiting for drive to get ready...\n");
+			infomsg(gettext("waiting for drive to get ready...\n"));
 			sleep(Autoloader);
 		} else {
-			fprintf(Terminal,"\ninsert next volume and press return to continue...");
+			fprintf(Terminal,gettext("\ninsert next volume and press return to continue..."));
 			fflush(Terminal);
 			tcflush(fileno(Terminal),TCIFLUSH);
 			fgetc(Terminal);
 		}
 		if (-1 == (In = open(Infile,O_RDONLY)))
-			errormsg("could not reopen input: %s\n",strerror(errno));
+			errormsg(gettext("could not reopen input: %s\n"),strerror(errno));
 	} while (In == -1);
 	Multivolume--;
-	fprintf(Terminal,"\nOK - continuing...");
+	fprintf(Terminal,gettext("\nOK - continuing..."));
 	fflush(Terminal);
 }
 #endif
@@ -230,10 +232,10 @@ void inputThread()
 {
 	int at = 0, err, num, perc, fill;
 
-	infomsg("inputThread: starting...\n");
+	infomsg(gettext("inputThread: starting...\n"));
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS,0);
 	while (!Finish) {
-		debugmsg("inputThread: wait\n");
+		debugmsg("inputThread: sem_wait\n");
 		sem_wait(&Dev2Buf);
 		num = 0;
 		do {
@@ -245,33 +247,33 @@ void inputThread()
 			} else
 #endif
 			if (-1 == err) {
-				errormsg("inputThread: error reading: %s\n",strerror(errno));
+				errormsg(gettext("inputThread: error reading: %s\n"),strerror(errno));
 				if (num) {
 					Rest = num;
 					sem_post(&Buf2Dev);
 				}
 				sem_post(&Percentage);
 				Finish = 1;
-				infomsg("inputThread: exiting...\n");
+				infomsg(gettext("inputThread: exiting...\n"));
 				pthread_exit((void *) 0);
 			} else if (0 == err) {
 				Finish = 1;
 				Rest = num;
-				debugmsg("inputThread: last block has %i bytes\n",Rest);
+				debugmsg(gettext("inputThread: last block has %i bytes\n"),Rest);
 				sem_post(&Buf2Dev);
 				sem_post(&Percentage);
-				infomsg("inputThread: exiting...\n");
+				infomsg(gettext("inputThread: exiting...\n"));
 				pthread_exit(0);
 			} 
 			num += err;
 		} while (num < Blocksize);
-		debugmsg("inputThread: post\n");
+		debugmsg("inputThread: sem_post\n");
 		sem_post(&Buf2Dev);
 		sem_getvalue(&Buf2Dev,&fill);
 		if (((float) fill / (float) Numblocks) >= Start) {
 			sem_getvalue(&Percentage,&perc);
 			if (!perc) {
-				infomsg("\ninputThread: percentage reached - restarting output...\n");
+				infomsg(gettext("\ninputThread: percentage reached - restarting output...\n"));
 				sem_post(&Percentage);
 			}
 		}
@@ -281,7 +283,7 @@ void inputThread()
 		Numin++;
 	}
 	sem_post(&Percentage);
-	infomsg("inputThread: exiting...");
+	infomsg(gettext("inputThread: exiting..."));
 }
 
 #ifdef MULTIVOLUME
@@ -290,34 +292,34 @@ void requestOutputVolume()
 	char cmd[15+strlen(Outfile)];
 
 	if (!Outfile) {
-		errormsg("End of volume, but not end of input:\n"
-			"Output file must be given (option -o) for multi volume support!\n");
+		errormsg(gettext("End of volume, but not end of input:\n"
+			"Output file must be given (option -o) for multi volume support!\n"));
 		Finish = 1;
 		pthread_exit((void *) -1);
 	}
-	debugmsg("requesting new output volume\n");
+	debugmsg(gettext("requesting new output volume\n"));
 	close(Out);
 	do {
 		if ((Autoloader) && (Outfile)) {
-			infomsg("requesting change of volume...\n");
+			infomsg(gettext("requesting change of volume...\n"));
 			sprintf(cmd,"mt -f %s offline",Outfile);
 			if (-1 == system(cmd)) {
-				warningmsg("error executing mt to change volume in autoloader...\n");
+				warningmsg(gettext("error executing mt to change volume in autoloader...\n"));
 				Autoloader = 0;
 				continue;
 			}
-			infomsg("waiting for drive to get ready...\n");
+			infomsg(gettext("waiting for drive to get ready...\n"));
 			sleep(Autoloader);
 		} else {
-			fprintf(Terminal,"\nvolume full - insert new media and press return whe ready...\n");
+			fprintf(Terminal,gettext("\nvolume full - insert new media and press return whe ready...\n"));
 			tcflush(fileno(Terminal),TCIFLUSH);
 			fgetc(Terminal);
-			fprintf(Terminal,"\nOK - continuing...\n");
+			fprintf(Terminal,gettext("\nOK - continuing...\n"));
 		}
 		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|O_SYNC,0666)))
-			errormsg("error reopening output file: %s\n",strerror(errno));
+			errormsg(gettext("error reopening output file: %s\n"),strerror(errno));
 	} while (-1 == Out);
-	infomsg("continuing with next volume\n");
+	infomsg(gettext("continuing with next volume\n"));
 }
 
 void checkIncompleteOutput()
@@ -328,13 +330,13 @@ void checkIncompleteOutput()
 	debugmsg("Outblocksize = %i, mulretry = %i\n",Outblocksize,mulretry);
 	if ((0 != mulretry) || (0 == Outblocksize)) {
 		requestOutputVolume();
-		debugmsg("resetting outputsize to normal\n");
+		debugmsg(gettext("resetting outputsize to normal\n"));
 		if (0 != mulretry) {
 			Outsize = mulretry;
 			mulretry = 0;
 		}
 	} else {
-		debugmsg("setting to new outputsize (end of device)\n");
+		debugmsg(gettext("setting to new outputsize (end of device)\n"));
 		mulretry = Outsize;
 		Outsize = Outblocksize;
 	}
@@ -345,22 +347,22 @@ void outputThread()
 {
 	int at = 0, err, fill, rest;
 	
-	infomsg("\noutputThread: starting...\n");
+	infomsg(gettext("\noutputThread: starting...\n"));
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS,0);
 	while (1) {
-		debugmsg("outputThread: wait\n");
+		debugmsg("outputThread: sem_wait\n");
 		sem_getvalue(&Buf2Dev,&fill);
 		if (Start && (!fill))
 			sem_wait(&Percentage);
 		sem_wait(&Buf2Dev);
 		if (Finish) {
-			debugmsg("outputThread: inputThread finished, %i blocks remaining\n",fill);
+			debugmsg(gettext("outputThread: inputThread finished, %i blocks remaining\n"),fill);
 			sem_getvalue(&Buf2Dev,&fill);
 			if ((0 == Rest) && (0 == fill)) {
-				infomsg("outputThread: finished - exiting...\n");
+				infomsg(gettext("outputThread: finished - exiting...\n"));
 				pthread_exit((void *) 0);
 			} else if (0 == fill) {
-				debugmsg("outputThread: last block has %i bytes\n",Rest);
+				debugmsg(gettext("outputThread: last block has %i bytes\n"),Rest);
 				Blocksize = Rest;
 			}
 		}
@@ -380,7 +382,7 @@ void outputThread()
 #else
 			if (-1 == err) {
 #endif
-				errormsg("outputThread: error writing: %s\n",strerror(errno));
+				errormsg(gettext("outputThread: error writing: %s\n"),strerror(errno));
 				Finish = 1;
 				sem_post(&Dev2Buf);
 				pthread_exit((void *) -1);
@@ -393,11 +395,11 @@ void outputThread()
 		if (Finish && (0 == fill)) {
 			infomsg("syncing...\n");
 			fsync(Out);
-			infomsg("outputThread: finished - exiting...\n");
+			infomsg(gettext("outputThread: finished - exiting...\n"));
 			close(Out);
 			pthread_exit(0);
 		}
-		debugmsg("outputThread: post\n");
+		debugmsg("outputThread: sem_post\n");
 		sem_post(&Dev2Buf);
 		if (Numblocks == at)
 			at = 0;
@@ -414,35 +416,44 @@ void openNetworkInput(const char *host, unsigned short port)
 #else	
 	size_t clen;
 #endif
-	struct hostent *h = 0;
+	struct hostent *h = 0, *r = 0;
+	char *rhost = 0;
 
 	debugmsg("openNetworkInput(%s,%hu)\n",host,port);
-	infomsg("creating socket for network input...\n");
+	infomsg(gettext("creating socket for network input...\n"));
 	Sock = socket(AF_INET, SOCK_STREAM, 6);
 	if (0 > Sock)
-		fatal("could not create socket for network input: %s\n",strerror(errno));
+		fatal(gettext("could not create socket for network input: %s\n"),strerror(errno));
 	bzero((void *) &saddr, sizeof(saddr));
 	if (host) {
-		debugmsg("resolving hostname of input interface...\n");
+		debugmsg(gettext("resolving hostname of input interface...\n"));
 		if (0 == (h = gethostbyname(host)))
-			fatal("could not resolve server hostname!\n");	/* here should be a h_errno printout */
-		saddr.sin_family = h->h_addrtype;
-		memcpy(&saddr.sin_addr,h->h_addr_list[0],h->h_length);
-	} else {
-		saddr.sin_family = AF_INET;
-		saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+			fatal(gettext("could not resolve server hostname!\n"));	/* here should be a h_errno printout */
 	}
+	saddr.sin_family = AF_INET;
+	saddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	saddr.sin_port = htons(port);
 	infomsg("binding socket...\n");
 	if (0 > bind(Sock, (struct sockaddr *) &saddr, sizeof(saddr)))
-		fatal("could not bind to socket for network input: %s\n",strerror(errno));
-	infomsg("listening on socket...\n");
+		fatal(gettext("could not bind to socket for network input: %s\n"),strerror(errno));
+	infomsg(gettext("listening on socket...\n"));
 	if (0 > listen(Sock,1))		/* accept only 1 incoming connection */
-		fatal("could not listen on socket for network input: %s\n",strerror(errno));
-	infomsg("waiting to accept connection...\n");
-	In = accept(Sock, (struct sockaddr *) &caddr, &clen);
-	if (0 > In)
-		fatal("could not accept connection for network input: %s\n",strerror(errno));
+		fatal(gettext("could not listen on socket for network input: %s\n"),strerror(errno));
+	do {
+		if (0 < In) {
+			close(In);
+			rhost = inet_ntoa(caddr.sin_addr);
+			r = gethostbyaddr(rhost,strlen(rhost),AF_INET);
+			if (r)
+				errormsg(gettext("rejected connection from %s (%s)\n"),r->h_name,rhost);
+			else
+				errormsg(gettext("rejected connection from %s\n"),rhost);
+		}
+		infomsg(gettext("waiting to accept connection...\n"));
+		In = accept(Sock, (struct sockaddr *) &caddr, &clen);
+		if (0 > In)
+			fatal(gettext("could not accept connection for network input: %s\n"),strerror(errno));
+	} while (memcmp(&caddr.sin_addr,h->h_addr_list[0],h->h_length));
 }
 
 void openNetworkOutput(const char *host, unsigned short port)
@@ -451,20 +462,20 @@ void openNetworkOutput(const char *host, unsigned short port)
 	struct hostent *h = 0;
 
 	debugmsg("openNetworkOutput(%s,%hu)\n",host,port);
-	infomsg("creating socket for network output...\n");
+	infomsg(gettext("creating socket for network output...\n"));
 	Out = socket(AF_INET, SOCK_STREAM, 6);
 	if (0 > Out)
-		fatal("could not create socket for network output: %s\n",strerror(errno));
+		fatal(gettext("could not create socket for network output: %s\n"),strerror(errno));
 	bzero((void *) &saddr, sizeof(saddr));
 	saddr.sin_port = htons(port);
-	infomsg("resolving server host...\n");
+	infomsg(gettext("resolving server host...\n"));
 	if (0 == (h = gethostbyname(host)))
-		fatal("could not resolve server hostname!");	/* here should be a h_errno printout */
+		fatal(gettext("could not resolve server hostname!\n"));	/* here should be a h_errno printout */
 	saddr.sin_family = h->h_addrtype;
 	memcpy(&saddr.sin_addr,h->h_addr_list[0],h->h_length);
-	infomsg("connecting to server (%x)...\n",saddr.sin_addr);
+	infomsg(gettext("connecting to server (%x)...\n"),saddr.sin_addr);
 	if (0 > connect(Out, (struct sockaddr *) &saddr, sizeof(saddr)))
-		fatal("could not connect to server: %s\n",strerror(errno));
+		fatal(gettext("could not connect to server: %s\n"),strerror(errno));
 }
 
 void getNetVars(const char **argv, int *c, const char **server, unsigned short *port)
@@ -473,7 +484,7 @@ void getNetVars(const char **argv, int *c, const char **server, unsigned short *
 	
 	tmpserv = malloc(strlen(argv[*c] + 1));
 	if (0 == tmpserv)
-		fatal("out of memory in getNetVars(...)\n");
+		fatal(gettext("out of memory in getNetVars(...)\n"));
 	if (1 < sscanf(argv[*c],"%[0-9a-zA-Z.]:%hu",tmpserv,port)) {
 		*server = tmpserv;
 		return;
@@ -499,7 +510,7 @@ void version()
 
 void usage()
 {
-	fprintf(stderr,
+	fprintf(stderr,gettext(
 		"mbuffer [Options]\n\n"
 		"Options:\n"
 		"-b <num>   : use <num> blocks for buffer (default %i)\n"
@@ -515,21 +526,21 @@ void usage()
 		"-i <file>  : use <file> for input\n"
 		"-o <file>  : use <file> for output\n"
 #ifdef NETWORKING
-		"-I <port>  : use network port <port> as input\n"
-		"-O <h:p>   : output data to host <h> and port <p>\n"
+		"-I <h>:<p> : use network port <port> as input\n"
+		"-O <h>:<p> : output data to host <h> and port <p>\n"
 #endif
 #ifdef MULTIVOLUME
 		"-n <num>   : <num> volumes for input\n"
 #endif
 		"-T <file>  : as -t but uses <file> as buffer\n"
 		"-l <file>  : use <file> for logging messages\n"
-		"-u <num>   : pause <num> microseconds after each write\n"
+		"-u <num>   : pause <num> milliseconds after each write\n"
 		"-f         : overwrite existing files\n"
 		"-a <time>  : autoloader which needs <time> seconds to reload\n"
 		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"
 		"-q         : quiet - do not display the status on stderr\n"
 		"--version  : print version information\n\n"
-		"Unsupported buffer options: -t -Z -B\n",
+		"Unsupported buffer options: -t -Z -B\n"),
 		Numblocks,Blocksize);
 	exit(0);
 }
@@ -551,13 +562,13 @@ unsigned long long calcint(const char **argv, int c, unsigned long long d)
 		case 'B':
 			return i;
 		default:
-			fatal("unrecognized size charakter '%c' in option\n",c);
+			fatal(gettext("unrecognized size charakter '%c' in option\n"),c);
 			return d;
 		}
 	case 1:
 		return i;
 	}
-	errormsg("unrecognized argument \"%s\" for option \"%s\"\n",argv[c],argv[c-1]);
+	errormsg(gettext("unrecognized argument \"%s\" for option \"%s\"\n"),argv[c],argv[c-1]);
 	return d;
 }
 
@@ -586,49 +597,53 @@ int main(int argc, const char **argv)
 	unsigned short netPortOut = 0;
 #endif
 	
+	setlocale (LC_ALL, "");
+	bindtextdomain (PACKAGE, LOCALEDIR);
+	textdomain (PACKAGE);
+
 	Log = stderr;
 	for (c = 1; c < argc; c++) {
 		if (!argcheck("-s",argv,&c)) {
 			Blocksize = Outsize = calcint(argv,c,Blocksize);
 			optSset = 1;
-			debugmsg("Blocksize set to %Lu\n",Blocksize);
+			debugmsg("Blocksize = %Lu\n",Blocksize);
 		} else if (!argcheck("-m",argv,&c)) {
 			totalmem = calcint(argv,c,totalmem);
 			optMset = 1;
-			debugmsg("totalmem set to %Lu\n",totalmem);
+			debugmsg("totalmem = %Lu\n",totalmem);
 		} else if (!argcheck("-b",argv,&c)) {
 			Numblocks = (atoi(argv[c])) ? (atoi(argv[c])) : Numblocks;
 			optBset = 1;
-			debugmsg("Numblocks set to %i\n",Numblocks);
+			debugmsg("Numblocks = %i\n",Numblocks);
 #ifdef HAVE_ST_BLKSIZE
 		} else if (!argcheck("-d",argv,&c)) {
 			setOutsize = 1;
-			debugmsg("setting output size according to the blocksize of the device\n");
+			debugmsg(gettext("setting output size according to the blocksize of the device\n"));
 #endif
 		} else if (!argcheck("-v",argv,&c)) {
 			Verbose = (atoi(argv[c])) ? (atoi(argv[c])) : Verbose;
-			debugmsg("Verbose set to %i\n",Verbose);
+			debugmsg("Verbose = %i\n",Verbose);
 		} else if (!argcheck("-u",argv,&c)) {
-			Pause = (atoi(argv[c])) ? (atoi(argv[c])) : Pause;
-			debugmsg("Pause set to %i\n",Pause);
+			Pause = (atoi(argv[c])) ? (atoi(argv[c])) * 1000 : Pause;
+			debugmsg("Pause = %i\n",Pause);
 #ifdef MULTIVOLUME
 		} else if (!argcheck("-n",argv,&c)) {
 			Multivolume = atoi(argv[c]) - 1;
 			if (Multivolume <= 0)
-				fatal("argument for number of volumes must be > 0\n");
-			debugmsg("Multivolume set to %i\n",Multivolume);
+				fatal(gettext("argument for number of volumes must be > 0\n"));
+			debugmsg("Multivolume = %i\n",Multivolume);
 #endif
 		} else if (!argcheck("-i",argv,&c)) {
 			Infile = argv[c];
-			debugmsg("Infile set to %s\n",Infile);
+			debugmsg("Infile = %s\n",Infile);
 #ifdef NETWORKING
 		} else if (!argcheck("-I",argv,&c)) {
 			getNetVars(argv,&c,&client,&netPortIn);
-			debugmsg("Network input set to %s:%hu\n",client,netPortIn);
+			debugmsg(gettext("Network input set to %s:%hu\n"),client,netPortIn);
 #endif
 		} else if (!argcheck("-o",argv,&c)) {
 			Outfile = argv[c];
-			debugmsg("Outfile set to %s\n",Outfile);
+			debugmsg("Outfile = \"%s\"\n",Outfile);
 #ifdef NETWORKING
 		} else if (!argcheck("-O",argv,&c)) {
 			getNetVars(argv,&c,&server,&netPortOut);
@@ -637,37 +652,36 @@ int main(int argc, const char **argv)
 		} else if (!argcheck("-T",argv,&c)) {
 			Tmpfile = malloc(strlen(argv[c]) + 1);
 			if (!Tmpfile)
-				fatal("out of memory");
+				fatal(gettext("out of memory"));
 			strcpy(Tmpfile, argv[c]);
 			Memmap = 1;
-			debugmsg("Tmpfile set to %s\n",Tmpfile);
+			debugmsg("Tmpfile = %s\n",Tmpfile);
 		} else if (!argcheck("-l",argv,&c)) {
 			Log = fopen(argv[c],"w");
 			if (0 == Log) {
 				Log = stderr;
-				errormsg("error opening log file: %s\n",strerror(errno));
+				errormsg(gettext("error opening log file: %s\n"),strerror(errno));
 			}
-			debugmsg("logFile set to %s\n",argv[c]);
+			debugmsg(gettext("logFile set to %s\n"),argv[c]);
 #ifdef HAVE_MMAP
 		} else if (!strcmp("-t",argv[c])) {
 			Memmap = 1;
-			debugmsg("mm set to 1\n");
+			debugmsg("mm = 1\n");
 #endif
 		} else if (!strcmp("-f",argv[c])) {
 			Nooverwrite = 0;
-			debugmsg("Nooverwrite set to 0\n");
+			debugmsg("Nooverwrite = 0\n");
 		} else if (!strcmp("-q",argv[c])) {
-			debugmsg("disabling display of status\n");
+			debugmsg(gettext("disabling display of status\n"));
 			Status = 0;
 		} else if (!argcheck("-a",argv,&c)) {
 			Autoloader = atoi(argv[c]);
-			debugmsg("Autoloader time set to %i\n",Autoloader);
-			warningmsg("This is an untested feature. Report wheather it works or it will be removed!\n");
+			debugmsg("Autoloader time = %i\n",Autoloader);
 		} else if (!argcheck("-p",argv,&c)) {
 			if (1 != sscanf(argv[c],"%f",&Start))
 				Start = 0;
 			Start /= 100;
-			debugmsg("Start set to %f%%\n",Start);
+			debugmsg("Start = %f%%\n",Start);
 		} else if (!strcmp("--help",argv[c])) {
 			usage();
 		} else if (!strcmp("-h",argv[c])) {
@@ -675,73 +689,73 @@ int main(int argc, const char **argv)
 		} else if (!strcmp("--version",argv[c])) {
 			version();
 		} else
-			fatal("unknown argument \"%s\"\n",argv[c]);
+			fatal(gettext("unknown option \"%s\"\n"),argv[c]);
 	}
 
 	/* consistency check for options */
 	if (optBset&optSset&optMset) {
 		if (Numblocks * Blocksize != totalmem)
-			fatal("inconsistent options: blocksize * number of blocks != totalsize!\n");
+			fatal(gettext("inconsistent options: blocksize * number of blocks != totalsize!\n"));
 	} else if ((!optBset&optSset&optMset) || (optMset&!optBset&!optSset)) {
 		if ((totalmem / Blocksize) >= (1LL << 31))
-			fatal("maximum number of managable blocks is %Li\n"
-				"Try a bigger blocksize!\n",1LL << 31);
+			fatal(gettext("maximum number of managable blocks is %Li\n"
+				"Try a bigger blocksize!\n"),1LL << 31);
 		Numblocks = totalmem / Blocksize;
-		infomsg("Numblocks set to %i\n",Numblocks);
+		infomsg("Numblocks = %i\n",Numblocks);
 	} else if (optBset&!optSset&optMset) {
 		Blocksize = totalmem / Numblocks;
-		infomsg("blocksize set to %Lu\n",Blocksize);
+		infomsg("blocksize = %Lu\n",Blocksize);
 	}
 	if (Autoloader)
 		if ((!Outfile) && (!Infile))
-			fatal("Setting autoloader time without using a device doesn't make any sense!\n");
+			fatal(gettext("Setting autoloader time without using a device doesn't make any sense!\n"));
 #ifdef NETWORKING
 	if (Infile && netPortIn)
-		fatal("Setting both network input port and input file doesn't make sense!\n");
+		fatal(gettext("Setting both network input port and input file doesn't make sense!\n"));
 	if (Outfile && netPortOut)
-		fatal("Setting both network output and output file doesn't make sense!\n");
+		fatal(gettext("Setting both network output and output file doesn't make sense!\n"));
 	if ((0 != client) && (0 == netPortIn))
-		fatal("You need to set a network port for network input!\n");
+		fatal(gettext("You need to set a network port for network input!\n"));
 	if ((0 == netPortOut) ^ (0 == server))
-		fatal("When sending data to a server, both servername and port must be set!\n");
+		fatal(gettext("When sending data to a server, both servername and port must be set!\n"));
 #endif
 
 #ifdef MULTIVOLUME
 	/* multi volume input consistency checking */
 	if ((Multivolume) && (!Infile))
-		fatal("multi volume support for input needs an explicit given input device (option -i)\n");
+		fatal(gettext("multi volume support for input needs an explicit given input device (option -i)\n"));
 #endif
 
 	/* create buffer */
 	Buffer = (char **) malloc(Numblocks * sizeof(char *));
 	if (!Buffer)
-		fatal("Could not allocate enough memory!\n");
+		fatal(gettext("Could not allocate enough memory!\n"));
 #ifdef HAVE_MMAP
 	if (Memmap) {
-		infomsg("mapping temporary file to memory with %i blocks with %Lu byte (%Lu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
+		infomsg(gettext("mapping temporary file to memory with %i blocks with %Lu byte (%Lu kB total)...\n"),Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
 		if (!Tmpfile) {
 			Tmpfile = malloc(20*sizeof(char));
 			if (!Tmpfile)
-				fatal("out of memory.\n");
+				fatal(gettext("out of memory.\n"));
 			strcpy(Tmpfile,"/tmp/mbuffer-XXXXXX");
 			Tmp = mkstemp(Tmpfile);
 		} else {
 			Tmp = open(Tmpfile,O_RDWR|O_CREAT|O_EXCL);
 		}
 		if (-1 == Tmp)
-			fatal("could not create temporary file (%s): %s\n",Tmpfile,strerror(errno));
+			fatal(gettext("could not create temporary file (%s): %s\n"),Tmpfile,strerror(errno));
 		/* resize the file. Needed - at least under linux, who knows why? */
 		if (-1 == lseek(Tmp,Numblocks*Blocksize-sizeof(int),SEEK_SET))
-			fatal("could not resize temporary file: %s\n",strerror(errno));
+			fatal(gettext("could not resize temporary file: %s\n"),strerror(errno));
 		if (-1 == write(Tmp,&c,sizeof(int)))
-			fatal("could not resize temporary file: %s\n",strerror(errno));
+			fatal(gettext("could not resize temporary file: %s\n"),strerror(errno));
 		Buffer[0] = mmap(0,Blocksize*Numblocks,PROT_READ|PROT_WRITE,MAP_PRIVATE,Tmp,0);
 		if (MAP_FAILED == Buffer[0])
-			fatal("could not map buffer-file to memory: %s\n",strerror(errno));
-		debugmsg("temporary file mapped to address %p\n",Buffer[0]);
+			fatal(gettext("could not map buffer-file to memory: %s\n"),strerror(errno));
+		debugmsg(gettext("temporary file mapped to address %p\n"),Buffer[0]);
 	} else {
 #endif
-		infomsg("allocating memory for %i blocks with %Lu byte (%Lu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
+		infomsg(gettext("allocating memory for %i blocks with %Lu byte (%Lu kB total)...\n"),Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
 		Buffer[0] = (char *) malloc(Blocksize * Numblocks);
 #ifdef HAVE_MMAP
 	}
@@ -749,18 +763,18 @@ int main(int argc, const char **argv)
 	for (c = 1; c < Numblocks; c++)
 		Buffer[c] = Buffer[0] + Blocksize * c;
 
-	debugmsg("creating semaphores...\n");
+	debugmsg(gettext("creating semaphores...\n"));
 	if (0 != sem_init(&Buf2Dev,0,0))
-		fatal("Error creating semaphore Buf2Dev: %s\n",strerror(errno));
+		fatal(gettext("Error creating semaphore Buf2Dev: %s\n"),strerror(errno));
 	if (0 != sem_init(&Dev2Buf,0,Numblocks))
-		fatal("Error creating semaphore Dev2Buf: %s\n",strerror(errno));
+		fatal(gettext("Error creating semaphore Dev2Buf: %s\n"),strerror(errno));
 	if (0 != sem_init(&Percentage,0,0))
-		fatal("Error creating semaphore Percentage: %s\n",strerror(errno));
+		fatal(gettext("Error creating semaphore Percentage: %s\n"),strerror(errno));
 
-	debugmsg("opening streams...\n");
+	debugmsg(gettext("opening streams...\n"));
 	if (Infile) {
 		if (-1 == (In = open(Infile,O_RDONLY)))
-			fatal("could not open input file: %s\n",strerror(errno));
+			fatal(gettext("could not open input file: %s\n"),strerror(errno));
 #ifdef NETWORKING
 	} else if (netPortIn) {
 		openNetworkInput(client,netPortIn);
@@ -769,7 +783,7 @@ int main(int argc, const char **argv)
 		In = fileno(stdin);
 	if (Outfile) {
 		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|O_SYNC,0666)))
-			fatal("could not open output file: %s\n",strerror(errno));
+			fatal(gettext("could not open output file: %s\n"),strerror(errno));
 #ifdef NETWORKING
 	} else if (netPortOut) {
 		openNetworkOutput(server,netPortOut);
@@ -778,42 +792,42 @@ int main(int argc, const char **argv)
 		Out = fileno(stdout);
 
 #ifdef HAVE_ST_BLKSIZE
-	debugmsg("checking output device...\n");
+	debugmsg(gettext("checking output device...\n"));
 	if (-1 == fstat(Out,&st))
-		fatal("could not stat output: %s\n",strerror(errno));
+		fatal(gettext("could not stat output: %s\n"),strerror(errno));
 	if (S_ISBLK(st.st_mode) || S_ISCHR(st.st_mode)) {
-		infomsg("blocksize is %i bytes on output device\n",st.st_blksize);
+		infomsg(gettext("blocksize is %i bytes on output device\n"),st.st_blksize);
 		if (Blocksize%st.st_blksize != 0)
-			warningmsg("Blocksize should be a multiple of the blocksize of the output device (is %i)!\n"
-				   "This can cause corrupt data when writing to multiple volumes...\n",st.st_blksize);
+			warningmsg(gettext("Blocksize should be a multiple of the blocksize of the output device (is %i)!\n"
+					"This can cause problems with some device/OS combinations...\n"),st.st_blksize);
 		Outblocksize = st.st_blksize;
 		if ((setOutsize) && (Blocksize > st.st_blksize)) {
-			infomsg("setting output blocksize to %i\n",st.st_blksize);
+			infomsg(gettext("setting output blocksize to %i\n"),st.st_blksize);
 			Outsize = st.st_blksize;
 		}
 	} else
-		infomsg("no device on output stream\n");
+		infomsg(gettext("no device on output stream\n"));
 #elif MULTIVOLUME
-	warningmsg("Could not stat output device (unsupported by system)!\n"
+	warningmsg(gettext("Could not stat output device (unsupported by system)!\n"
 		   "This can result in incorrect written data when\n"
-		   "using multiple volumes. Continue at your own risc!\n");
+		   "using multiple volumes. Continue at your own risc!\n"));
 #endif
 
-	debugmsg("accessing terminal...\n");
+	debugmsg(gettext("accessing terminal...\n"));
 	Terminal = fopen("/dev/tty","r+");
 	if (!Terminal) {
-		errormsg("could not open terminal: %s\n",strerror(errno));
-		warningmsg("multi volume support turned off");
+		errormsg(gettext("could not open terminal: %s\n"),strerror(errno));
+		warningmsg(gettext("multi volume support turned off"));
 		Status = 0;
 	}
 
-	debugmsg("registering signals...\n");
+	debugmsg(gettext("registering signals...\n"));
 	if (SIG_ERR == signal(SIGINT,sigHandler))
-		warningmsg("error registering new SIGINT handler: %s\n",strerror(errno));
+		warningmsg(gettext("error registering new SIGINT handler: %s\n"),strerror(errno));
 	if (SIG_ERR == signal(SIGTERM,sigHandler))
-		warningmsg("error registering new SIGINT handler: %s\n",strerror(errno));
+		warningmsg(gettext("error registering new SIGINT handler: %s\n"),strerror(errno));
 
-	debugmsg("starting threads...\n");
+	debugmsg(gettext("starting threads...\n"));
 	pthread_create(&Reader,0,(void *(*)(void *))&inputThread,0);
 	pthread_create(&Writer,0,(void *(*)(void *))&outputThread,0);
 	if (Status)

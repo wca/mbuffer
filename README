@@ -22,31 +22,8 @@ mbuffer is a raplacement for buffer with additional functionality:
 # --? bugs to hunt ?-- :-((
 
 
-INSTALL:
-========
-To install run
-# ./configure
-with the options you desire.
-To get a list of the possible options, run:
-# ./configure --help
-HINT: for solaris workstations you need to run:
-# ./configure --host sparc-sun-solaris
-Then just do a:
-# make; make install
-
-
-EXPERIMENTAL:
-=============
-This version of mbuffer includes new code which is experimental.
-By default this code is not compiled in. If you want to test
-it run ./configure --enable-experimental. The code should enable
-multi-volume usage on the output stream. Please test it and
-send comments and bug reports if you are interested that such
-a thing should be included.
-
-
-NETWORKING (EXPERIMENTAL):
-==========================
+NETWORKING (BETA):
+==================
 The included networking code is based on TCP and should
 therefore be fairly stable out of the box. To use it
 you should know the basics of TCP/IP. Use only
@@ -92,3 +69,4 @@ FEEDBACK:
 =========
 It is always nice to get feedback. If you encounter
 a problem or a bug, send me a note.
+(software@maier-komor.de)

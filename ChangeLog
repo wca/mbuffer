@@ -1,3 +1,9 @@
+20010807:
+- update for networking code: added client host checking
+- message update
+- docu update
+- localization added
+
 20010716:
 - fixed option -q to not block out usage of multi
   volume support
