@@ -9,7 +9,7 @@ test "$exec_prefix" = NONE && exec_prefix=$prefix
 
 PACKAGE=mbuffer
 
-VERSION=20010624
+VERSION=20010626
 AC_DEFINE_UNQUOTED(VERSION,"${VERSION}")
 AC_SUBST(VERSION)
 

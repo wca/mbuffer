@@ -1,3 +1,7 @@
+20010626:
+- bugfix: mbuffer didn't work anymore with pipes due
+  to incorrect set Outsize (0)
+
 20010624:
 - added experimental networking code
 - bugfix for multivolume-code which might have caused

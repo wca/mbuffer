@@ -26,7 +26,7 @@ int Sock = 0;
 
 pthread_t Reader, Writer;
 int Verbose = 3, Finish = 0, In, Out, Tmp, Rest = 0, Pause = 0, 
-	Memmap = 0, Status = 1, Outsize = 0, Nooverwrite = O_EXCL, 
+	Memmap = 0, Status = 1, Outsize = 10240, Nooverwrite = O_EXCL, 
 	Numblocks = 256;
 unsigned long long Blocksize = 10240, Numin = 0, Numout = 0;
 float Start = 0;
@@ -437,8 +437,12 @@ void usage()
 		"-I <port>  : use network port <port> as input\n"
 #endif
 		"-o <file>  : use <file> for output\n"
+#ifdef EXPERIMENTAL
+		"-O <h:p>   : output data to host <h> and port <p>\n"
+#endif
 #ifdef MULTIVOLUME
 		"-n <num>   : <num> volumes for input\n"
+		"WARNING    : multi-volume code is supposed to be buggy for big devices\n"
 #endif
 		"-T <file>  : as -t but uses <file> as buffer\n"
 		"-l <file>  : use <file> for logging messages\n"
@@ -506,7 +510,7 @@ int main(int argc, const char **argv)
 	Log = stderr;
 	for (c = 1; c < argc; c++) {
 		if (!argcheck("-s",argv,&c)) {
-			Blocksize = calcint(argv,c,Blocksize);
+			Blocksize = Outsize = calcint(argv,c,Blocksize);
 			optSset = 1;
 			debugmsg("Blocksize set to %Lu\n",Blocksize);
 		} else if (!argcheck("-m",argv,&c)) {
@@ -686,9 +690,10 @@ int main(int argc, const char **argv)
 		infomsg("blocksize on output device is %i\n",st.st_blksize);
 		if (Blocksize%st.st_blksize != 0)
 			warningmsg("Blocksize should be a multiple of the blocksize of the output device (is %i)!\n",st.st_blksize);
-		if (Blocksize != st.st_blksize)
+		if (Blocksize > st.st_blksize) {
 			infomsg("setting output blocksize to %i\n",st.st_blksize);
-		Outsize = st.st_blksize;
+			Outsize = st.st_blksize;
+		}
 	} else
 		infomsg("no device on output stream\n");
 #endif
