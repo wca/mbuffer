@@ -1,0 +1,6 @@
+20010124:
+- Bugfix: outputThread terminated too early in certain cases
+- Fix for correct termination if an error occured
+- added install rule in Makefile
+- status messages are now indebendend of other messages
+- a little bit more verbose debugging info

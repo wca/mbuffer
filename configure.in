@@ -9,7 +9,7 @@ test "$exec_prefix" = NONE && exec_prefix=$prefix
 
 PACKAGE=mbuffer
 
-VERSION=20010119
+VERSION=20010124
 AC_DEFINE_UNQUOTED(VERSION,"${VERSION}")
 AC_SUBST(VERSION)
 
@@ -17,6 +17,7 @@ AC_DEFINE(_REENTRANT,1,Needed for thread safe compilation)
 
 AC_LANG_C
 AC_PROG_CC
+AC_PROG_INSTALL
 
 AC_PATH_PROG(RM,rm)
 AC_PATH_PROG(STRIP,strip)

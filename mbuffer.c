@@ -15,7 +15,7 @@
 
 pthread_t Reader, Writer;
 int Verbose = 3, Finish = 0, In, Out, Tmp, Rest = 0, Numin = 0,
-    Numout = 0, Pause = 0, Memmap = 0;
+    Numout = 0, Pause = 0, Memmap = 0, Status = 1;
 float Start = 0;
 char *Tmpfile = 0;
 char **Buffer;
@@ -116,11 +116,12 @@ void statusThread()
 		last.time = now.time;
 		last.millitm = now.millitm;
 		total = (Numout*Blocksize)>>10;
-		fprintf(Log,"\rin at %8.1f kB/sec - out at %8.1f kB/sec - %i kB totally transfered - buffer %3.0f%% full",in,out,total,fill);
+		fprintf(stderr,"\rin at %8.1f kB/sec - out at %8.1f kB/sec - %i kB totally transfered - buffer %3.0f%% full",in,out,total,fill);
 		fflush(Log);
 		usleep(500000);
 		sem_getvalue(&Buf2Dev,&rest);
 	}
+	fprintf(stderr,"\n");
 	infomsg("statusThread: joining to terminate...\n");
 	pthread_join(Reader,0);
 	pthread_join(Writer,0);
@@ -141,10 +142,11 @@ void inputThread()
 		sem_wait(&Dev2Buf);
 		num = 0;
 		do {
-			debugmsg("inputThread: read\n");
+			debugmsg("inputThread: read %i\n",num);
 			err = read(In,Buffer[at] + num,Blocksize - num);
 			if (-1 == err) {
-				errormsg("error reading: %s\n",strerror(errno));
+				errormsg("inputThread: error reading: %s\n",strerror(errno));
+				Finish = 1;
 				pthread_exit((void *) 0);
 			} else if (0 == err) {
 				Finish = 1;
@@ -168,7 +170,7 @@ void inputThread()
 
 void outputThread()
 {
-	int at = 0, err, fill = 0, num;
+	int at = 0, err, fill, num;
 	
 	if (Start)
 		debugmsg("outputThread: waiting for buffer...\n");
@@ -176,6 +178,7 @@ void outputThread()
 		usleep(100000);
 		sem_getvalue(&Buf2Dev,&fill);
 	}
+	fill = -1;
 	infomsg("outputThread: starting...\n");
 	while (1) {
 		debugmsg("outputThread: wait\n");
@@ -183,11 +186,11 @@ void outputThread()
 		num = 0;
 		if (Finish) {
 			sem_getvalue(&Buf2Dev,&fill);
+			debugmsg("outputThread: inputThread finished, %i blocks remaining\n",fill);
 			if ((0 == Rest) && (0 == fill)) {
-				infomsg("outputThread: exiting...\n");
-				pthread_exit(0);
-			}
-			if (0 == fill) {
+				infomsg("outputThread: finished - exiting...\n");
+				pthread_exit((void *) 0);
+			} else if (0 == fill) {
 				debugmsg("outputThread: last block has %i bytes\n",Rest);
 				Blocksize = Rest;
 			}
@@ -197,18 +200,18 @@ void outputThread()
 			err = write(Out,Buffer[at++] + num,Blocksize - num);
 			usleep(Pause);
 			if (-1 == err) {
-				errormsg("\nerror writing: %s\n",strerror(errno));
+				errormsg("outputThread: error writing: %s\n",strerror(errno));
 				Finish = 1;
 				pthread_exit((void *) -1);
 			}
 			num += err;
 		} while (num < Blocksize);
-		debugmsg("outputThread: post\n");
 		if (Finish && (0 == fill)) {
-			infomsg("outputThread: exiting...\n");
+			infomsg("outputThread: finished - exiting...\n");
 			close(Out);
 			pthread_exit(0);
 		}
+		debugmsg("outputThread: post\n");
 		sem_post(&Dev2Buf);
 		if (Numblocks == at)
 			at = 0;
@@ -266,7 +269,7 @@ void usage()
 		"-u <num>   : pause <num> microseconds after each write\n"\
 		"-f         : overwrite existing files\n"\
 		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"\
-		"-q         : quiet (equivalent to -v 0)\n"\
+		"-q         : quiet - do not display the status on stderr\n"\
 		"--version  : print version information\n\n"\
 		"Unsupported buffer options: -t -Z -B\n",
 		Numblocks,Blocksize);
@@ -363,8 +366,8 @@ int main(int argc, char **argv)
 			nooverwrite = 0;
 			debugmsg("overwrite set to 0\n");
 		} else if (!strcmp("-q",argv[c])) {
-			fprintf(stderr,"setting Verbose to 0\n");
-			Verbose = 0;
+			debugmsg("disabling display of status\n");
+			Status = 0;
 		} else if (!argcheck("-p",argv,&c)) {
 			if (1 != sscanf(argv[c],"%f",&Start))
 				Start = 0;
@@ -449,7 +452,7 @@ int main(int argc, char **argv)
 	debugmsg("starting threads...\n");
 	pthread_create(&Reader,0,(void *(*)(void *))&inputThread,0);
 	pthread_create(&Writer,0,(void *(*)(void *))&outputThread,0);
-	if (Verbose >= 3)
+	if (Status)
 		statusThread();
 	else {
 		pthread_join(Reader,0);
