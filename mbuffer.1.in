@@ -1,4 +1,4 @@
-.TH "mbuffer" "1" "20010515" "Thomas Maier-Komor" "console utility"
+.TH "mbuffer" "1" "@VERSION@" "Thomas Maier-Komor" "console utility"
 .SH "NAME"
 mbuffer \- measuring buffer
 .SH "SYNTAX"
@@ -11,10 +11,12 @@ mbuffer buffers i/o operations and displays the throughput rate. It is multithre
 .LP 
 .TP 
 \fB\-i\fR <\fIfilename\fP>
-use \fIfilename\fP as input instead of the standard input
+use \fIfilename\fP as input instead of the standard input (needs to be
+given for multi volume support)
 .TP 
 \fB\-o\fR <\fIfilename\fP>
-use \fIfilename\fP as output instead of the standard output
+use \fIfilename\fP as output instead of the standard output (needs to be
+given for multi volume support)
 .TP 
 \fB\-b\fR <\fInum\fP>
 use \fInum\fP blocks for buffer (default 256)

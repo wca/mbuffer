@@ -643,7 +643,7 @@ test "$exec_prefix" = NONE && exec_prefix=$prefix
 
 PACKAGE=mbuffer
 
-VERSION=20010515
+VERSION=20010528
 cat >> confdefs.h <<EOF
 #define VERSION "${VERSION}"
 EOF
@@ -1941,7 +1941,7 @@ done
 ac_given_srcdir=$srcdir
 ac_given_INSTALL="$INSTALL"
 
-trap 'rm -fr `echo "Makefile config.h" | sed "s/:[^ ]*//g"` conftest*; exit 1' 1 2 15
+trap 'rm -fr `echo "Makefile mbuffer.1 config.h" | sed "s/:[^ ]*//g"` conftest*; exit 1' 1 2 15
 EOF
 cat >> $CONFIG_STATUS <<EOF
 
@@ -2040,7 +2040,7 @@ EOF
 
 cat >> $CONFIG_STATUS <<EOF
 
-CONFIG_FILES=\${CONFIG_FILES-"Makefile"}
+CONFIG_FILES=\${CONFIG_FILES-"Makefile mbuffer.1"}
 EOF
 cat >> $CONFIG_STATUS <<\EOF
 for ac_file in .. $CONFIG_FILES; do if test "x$ac_file" != x..; then

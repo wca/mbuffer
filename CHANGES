@@ -1,10 +1,21 @@
+20010528:
+- semantic fix for option -p to be consistend with buffer
+- bugfix: for dropped blocks in multi-volumen code
+- fix for lockup if SIG_BRK is sent during a volume request
+
+20010518:
+- Bugfix: multi volume output now should work
+	  (bugreport by Dan Hollis)
+- docu update
+- added some extra checks after running lint...
+
 20010515:
 - Docu update concerning usage of multi volume support
 - multi volume options consistency checking added
 
 20010509:
 - summary is now also displayed upon break and terminate
-- bugfix: summary overflow
+- Bugfix: summary overflow
 - experimental feature: input of multiple volumes
 
 20010507:
@@ -18,7 +29,7 @@
 - Bugfix: fixed sleep, which limited the performace to 1MB/s
           (credits go to Padraig Brady <padraig@antefacto.com>)
 - Bugfix: fixed incorrect display of total datatransfer for >2GB
-- cosmetic: on sighup print newline on stderr
+- Cosmetic: on sighup print newline on stderr
 - added manpage
 
 20010208:

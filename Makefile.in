@@ -20,11 +20,11 @@ $(TARGET): $(OBJECTS)
 	$(CC) $(LDFLAGS) $(LIBS) $< -o $@
 
 clean:
-	$(RM) -f *.o
+	$(RM) -f *.o core
 
 distclean: clean
 	$(RM) -f $(TARGET) config.h config.cache config.log \
-	config.status *~ Makefile out
+	config.status *~ Makefile out mbuffer.1
 
 install:
 	$(INSTALL) $(TARGET) $(bindir)
