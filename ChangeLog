@@ -1,3 +1,8 @@
+20050321:
+- compile time fix for gentoo and suse 9.2
+- made --enable-debug and --enable-md5 work
+- gcc optimization flag set to -O2, -O as default
+
 20050125:
 - fixed operation of low watermark (-p)
 - made printf formating more standard conforming

@@ -17,9 +17,9 @@
 #include <termios.h>
 #include <unistd.h>
 
-#ifdef MHASH
+#ifdef HAVE_LIBMHASH
 #include <mhash.h>
-#elif defined MD5
+#elif defined HAVE_LIBMD5
 #include <md5.h>
 #endif
 
@@ -43,9 +43,9 @@ float StartWrite = 0, StartRead = 1;
 char *Tmpfile = 0, **Buffer;
 const char *Infile = 0, *Outfile = 0, *Tape = 0;
 int Multivolume = 0;
-#ifdef MHASH
-MHASH MD5hash;
-#elif defined MD5
+#ifdef HAVE_LIBMHASH
+HAVE_LIBMHASH MD5hash;
+#elif defined HAVE_LIBMD5
 MD5_CTX md5ctxt;
 #endif
 sem_t Dev2Buf,Buf2Dev,PercentageHigh,PercentageLow;
@@ -113,6 +113,8 @@ void fatal(const char *msg, ...)
 	exit(-1);
 }
 
+
+
 void summary(unsigned long long numb, float secs)
 {
 	int h = (int) secs/3600, m = (int) secs/60;
@@ -141,7 +143,7 @@ void summary(unsigned long long numb, float secs)
 		fprintf(Terminal,"%.1f MB/s\n",av/1048576);
 	else
 		fprintf(Terminal,"%.1f GB/s\n",av/1073741824);	/* OK - this is really silly - at least now in 2003, yeah and still in 2005... */
-#ifdef MHASH
+#ifdef HAVE_LIBMHASH
 	if (Hash) {
 		unsigned char hashvalue[16];
 		int i;
@@ -152,7 +154,7 @@ void summary(unsigned long long numb, float secs)
 			fprintf(Terminal," %02x",hashvalue[i]);
 		fprintf(Terminal,"\n");
 	}
-#elif defined MD5
+#elif defined HAVE_LIBMD5
 	if (Hash) {
 		unsigned char hashvalue[16];
 		int i;
@@ -165,6 +167,8 @@ void summary(unsigned long long numb, float secs)
 	}
 #endif
 }
+
+
 
 void terminate(void)
 {
@@ -191,6 +195,8 @@ void terminate(void)
 	exit(0);
 }
 
+
+
 RETSIGTYPE sigHandler(int signr)
 {
 	switch (signr) {
@@ -206,6 +212,8 @@ RETSIGTYPE sigHandler(int signr)
 		debugmsg("\rcatched unexpected signal %d...\n",signr);
 	}
 }
+
+
 
 void statusThread(void) 
 {
@@ -256,6 +264,8 @@ void statusThread(void)
 	exit(0);
 }
 
+
+
 void requestInputVolume(void)
 {
 	char cmd[15+strlen(Infile)];
@@ -297,6 +307,8 @@ void requestInputVolume(void)
 	assert(0 == err);
 }
 
+
+
 void *inputThread(void *ignored)
 {
 	int err, fill = 0;
@@ -332,10 +344,10 @@ void *inputThread(void *ignored)
 				Rest = num;
 				Finish = 1;
 				debugmsg("inputThread: last block has %d bytes\n",num);
-				#ifdef MHASH
+				#ifdef HAVE_LIBMHASH
 				if (Hash)
 					mhash(MD5hash,Buffer[at],num);
-				#elif defined MD5
+				#elif defined HAVE_LIBMD5
 				if (Hash)
 					MD5Update(&md5ctxt,Buffer[at],num);
 				#endif
@@ -347,10 +359,10 @@ void *inputThread(void *ignored)
 			num += err;
 		} while (num < Blocksize);
 		debugmsg("inputThread: sem_post\n");
-		#ifdef MHASH
+		#ifdef HAVE_LIBMHASH
 		if (Hash)
 			mhash(MD5hash,Buffer[at],Blocksize);
-		#elif defined MD5
+		#elif defined HAVE_LIBMD5
 		if (Hash)
 			MD5Update(&md5ctxt,Buffer[at],num);
 		#endif
@@ -370,6 +382,8 @@ void *inputThread(void *ignored)
 		Numin++;
 	}
 }
+
+
 
 void requestOutputVolume(void)
 {
@@ -411,6 +425,8 @@ void requestOutputVolume(void)
 	infomsg("continuing with next volume\n");
 }
 
+
+
 void checkIncompleteOutput(void)
 {
 	static int mulretry = 0;	/* well this isn't really good design,
@@ -430,6 +446,8 @@ void checkIncompleteOutput(void)
 		Outsize = Outblocksize;
 	}
 }
+
+
 
 void *outputThread(void *ignored)
 {
@@ -794,14 +812,14 @@ int main(int argc, const char **argv)
 		} else if (!strcmp("--version",argv[c])) {
 			version();
 		} else if (!strcmp("--md5",argv[c])) {
-#ifdef MHASH
+#ifdef HAVE_LIBMHASH
 			Hash = 1;
 			MD5hash = mhash_init(MHASH_MD5);
 			if (MHASH_FAILED == MD5hash) {
 				errormsg("error initializing md5 hasing - will not generate hash...");
 				Hash = 0;
 			}
-#elif defined MD5
+#elif defined HAVE_LIBMD5
 			Hash = 1;
 			MD5Init(&md5ctxt);
 #else
