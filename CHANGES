@@ -1,3 +1,8 @@
+20010619:
+- multi-volume support is now enabled by default
+- minor docu updates
+- fix for configure to work on Solaris 5.1
+
 20010528:
 - semantic fix for option -p to be consistend with buffer
 - bugfix: for dropped blocks in multi-volumen code

@@ -9,7 +9,7 @@ test "$exec_prefix" = NONE && exec_prefix=$prefix
 
 PACKAGE=mbuffer
 
-VERSION=20010528
+VERSION=20010619
 AC_DEFINE_UNQUOTED(VERSION,"${VERSION}")
 AC_SUBST(VERSION)
 
@@ -23,7 +23,7 @@ AC_PATH_PROG(RM,rm)
 AC_PATH_PROG(STRIP,strip)
 
 AC_CHECK_LIB(pthread,pthread_attr_init,,AC_MSG_ERROR(you need the pthread library!))
-AC_SEARCH_LIBS(sem_init,rt,,AC_MSG_ERROR(could not find semaphore functions!))
+AC_SEARCH_LIBS(sem_init,rt posix,,AC_MSG_ERROR(could not find semaphore functions!))
 
 if test -n "$GCC"; then
         CFLAGS="$CFLAGS -Wall"
@@ -63,6 +63,11 @@ AC_ARG_ENABLE(debug,
         )
 AC_SUBST(DEBUG)
 AC_SUBST(NDEBUG)
+
+AC_ARG_ENABLE(multi-volume,
+	--disable-multi-volume    disable multi-volume support,
+	,AC_DEFINE_UNQUOTED(MULTIVOLUME))
+AC_SUBST(MULTIVOLUME)
 
 AC_ARG_ENABLE(experimental,
         --enable-experimental     enable experimental code,

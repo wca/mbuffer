@@ -22,7 +22,7 @@ float Start = 0;
 char *Tmpfile = 0, **Buffer;
 const char *Infile = 0, *Outfile = 0;
 int Blocksize = 10240, Nooverwrite = O_EXCL, Numblocks = 256;
-#ifdef EXPERIMENTAL
+#ifdef MULTIVOLUME
 int Multivolume = 0;
 #endif
 sem_t Dev2Buf,Buf2Dev,Percentage;
@@ -165,6 +165,7 @@ void statusThread()
 		munmap(Buffer[0],Blocksize*Numblocks);
 	close(Tmp);
 	remove(Tmpfile);
+	ftime(&now);
 	diff = now.time - Starttime.time + (float) now.millitm / 1000 - (float) Starttime.millitm / 1000;
 	out = (float)(((long long) Numout * Blocksize) >> 10) / diff;
 	fprintf(Terminal,"summary: %i kB in %.1f sec - %.1f kB/sec average\n",
@@ -173,20 +174,20 @@ void statusThread()
 	exit(0);
 }
 
-#ifdef EXPERIMENTAL
+#ifdef MULTIVOLUME
 void requestInputVolume()
 {
 	close(In);
-	fprintf(Terminal,"\ninsert next volume...");
-	fflush(Terminal);
-	tcflush(fileno(Terminal),TCIFLUSH);
-	fgetc(Terminal);
-	fprintf(Terminal,"\nOK - continuing...");
+	do {
+		fprintf(Terminal,"\ninsert next volume...");
+		fflush(Terminal);
+		tcflush(fileno(Terminal),TCIFLUSH);
+		fgetc(Terminal);
+		if (-1 == (In = open(Infile,O_RDONLY)))
+			errormsg("could not reopen input: %s\n",strerror(errno));
+	} while (In == -1);
 	Multivolume--;
-	if (-1 == (In = open(Infile,O_RDONLY))) {
-		errormsg("could not reopen input: %s\n",strerror(errno));
-		pthread_exit((void *)-1);
-	}
+	fprintf(Terminal,"\nOK - continuing...");
 }
 #endif
 
@@ -203,7 +204,7 @@ void inputThread()
 		do {
 			debugmsg("inputThread: read %i\n",num);
 			err = read(In,Buffer[at] + num,Blocksize - num);
-#ifdef EXPERIMENTAL
+#ifdef MULTIVOLUME
 			if ((!err) && (Terminal) && (Multivolume)) {
 				requestInputVolume();
 			} else
@@ -242,7 +243,7 @@ void inputThread()
 	infomsg("inputThread: exiting...");
 }
 
-#ifdef EXPERIMENTAL
+#ifdef MULTIVOLUME
 void requestOutputVolume()
 {
 	if (!Outfile) {
@@ -292,7 +293,7 @@ void outputThread()
 		do {
 			debugmsg("outputThread: write %i\n",-num);
 			err = write(Out,Buffer[at] + num, Outsize > rest ? Outsize : rest );
-#ifdef EXPERIMENTAL
+#ifdef MULTIVOLUME
 			if ((-1 == err) && (Terminal) && ((errno == ENOMEM) || (errno == ENOSPC))) {
 				requestOutputVolume();
 				continue;
@@ -347,7 +348,7 @@ void usage()
 		"-p <num>   : start writing after buffer has been filled <num>%%\n"
 		"-i <file>  : use <file> for input\n"
 		"-o <file>  : use <file> for output\n"
-#ifdef EXPERIMENTAL
+#ifdef MULTIVOLUME
 		"-n <num>   : <num> volumes for input\n"
 #endif
 		"-T <file>  : as -t but uses <file> as buffer\n"
@@ -428,7 +429,7 @@ int main(int argc, char **argv)
 		} else if (!argcheck("-u",argv,&c)) {
 			Pause = (atoi(argv[c])) ? (atoi(argv[c])) : Pause;
 			debugmsg("Pause set to %i\n",Pause);
-#ifdef EXPERIMENTAL
+#ifdef MULTIVOLUME
 		} else if (!argcheck("-n",argv,&c)) {
 			Multivolume = atoi(argv[c]) - 1;
 			if (Multivolume <= 0)
@@ -489,7 +490,7 @@ int main(int argc, char **argv)
 		Blocksize = totalmem / Numblocks;
 		infomsg("blocksize set to %i\n",Blocksize);
 	}
-#ifdef EXPERIMENTAL
+#ifdef MULTIVOLUME
 	/* multi volume input consistency checking */
 	if ((Multivolume) && (!Infile))
 		fatal("multi volume support for input needs an explicit given input device (option -i)\n");

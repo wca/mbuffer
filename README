@@ -1,5 +1,5 @@
-m(easuring)buffer version 20010430
-==================================
+m(easuring) buffer
+==================
 AUTHOR: Thomas Maier-Komor
 e-mail: software@maier-komor.de
 
@@ -16,8 +16,23 @@ mbuffer is a raplacement for buffer with additional functionality:
 # display of i/o speed
 # optional use of memory mapped i/o for huge buffers
 # multithreaded instead of sharedmemory ipc
+# multi-volume support
 # compatible command-line options
 # --? bugs to hunt ?-- :-((
+
+
+INSTALL:
+========
+To install run
+# ./configure
+with the options you desire.
+To get a list of the possible options, run:
+# ./configure --help
+HINT: for solaris workstations you need to run:
+# ./configure --host sparc-sun-solaris
+Then just do a:
+# make; make install
+
 
 EXPERIMENTAL:
 =============
@@ -27,6 +42,11 @@ it run ./configure --enable-experimental. The code should enable
 multi-volume usage on the output stream. Please test it and
 send comments and bug reports if you are interested that such
 a thing should be included.
+(currently no experimental code is included - 
+ coming soon: networking code)
+
+In this version there is no experimental code. Soon networking
+stuff will be added here...
 
 
 TESTING:
@@ -49,3 +69,9 @@ TODO:
 =====
 # fix: warnings for tru64 compilation
 # fix: unknown bugs
+
+
+FEEDBACK:
+=========
+It is always nice to get feedback. If you encounter
+a problem or a bug, send me a note.
