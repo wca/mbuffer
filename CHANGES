@@ -1,3 +1,12 @@
+20010716:
+- fixed option -q to not block out usage of multi
+  volume support
+- docu update
+- minor debug message update
+- more autoloader sanity checks
+- changed status for networking stuff to BETA
+  i.e. new configure option "--enable-networking"
+
 20010704:
 - fixed possible termination hang on write error
 - fixed debugmessage for input thread

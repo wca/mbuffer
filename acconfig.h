@@ -13,6 +13,9 @@
 /* multi-support is enabled by default now */
 #undef MULTIVOLUME
 
+/* networking code is still BETA */
+#undef NETWORKING
+
 /* needed to include experimental code */
 #undef EXPERIMENTAL
 

@@ -15,7 +15,9 @@ use \fIfilename\fP as input instead of the standard input (needs to be
 given for multi volume support)
 .TP 
 \fB\-I\fR <\fIport\fP>
-use network port \fIport\fP as input instead of the standard input
+use network port \fIport\fP as input instead of the standard input. If
+given a hostname and a port in the form hostname:port the first interface 
+with the IP of hostname will be used.
 .TP 
 \fB\-o\fR <\fIfilename\fP>
 use \fIfilename\fP as output instead of the standard output (needs to be

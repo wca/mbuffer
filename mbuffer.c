@@ -15,7 +15,7 @@
 #include <termios.h>
 #include <unistd.h>
 
-#ifdef EXPERIMENTAL
+#ifdef NETWORKING
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -114,7 +114,7 @@ void terminate()
 	pthread_join(Writer,0);
 	if (Memmap)
 		munmap(Buffer[0],Blocksize*Numblocks);
-#ifdef EXPERIMENTAL
+#ifdef NETWORKING
 	if (Sock)
 		close(Sock);
 #endif
@@ -204,7 +204,11 @@ void requestInputVolume()
 		if ((Autoloader) && (Infile)) {
 			infomsg("requesting change of volume...\n");
 			sprintf(cmd,"mt -f %s offline",Infile);
-			system(cmd);
+			if (-1 == system(cmd)) {
+				warningmsg("error executing mt to change volume in autoloader...\n");
+				Autoloader = 0;
+				continue;
+			}
 			infomsg("waiting for drive to get ready...\n");
 			sleep(Autoloader);
 		} else {
@@ -293,25 +297,27 @@ void requestOutputVolume()
 	}
 	debugmsg("requesting new output volume\n");
 	close(Out);
-	warningmsg("multivolume is known to be buggy in some situations...\n");
-	if ((Autoloader) && (Outfile)) {
-		infomsg("requesting change of volume...\n");
-		sprintf(cmd,"mt -f %s offline",Outfile);
-		system(cmd);
-		infomsg("waiting for drive to get ready...\n");
-		sleep(Autoloader);
-	} else {
-		fprintf(Terminal,"\nvolume full - insert new media and press return whe ready...\n");
-		tcflush(fileno(Terminal),TCIFLUSH);
-		fgetc(Terminal);
-		fprintf(Terminal,"\nOK - continuing...\n");
-	}
+	do {
+		if ((Autoloader) && (Outfile)) {
+			infomsg("requesting change of volume...\n");
+			sprintf(cmd,"mt -f %s offline",Outfile);
+			if (-1 == system(cmd)) {
+				warningmsg("error executing mt to change volume in autoloader...\n");
+				Autoloader = 0;
+				continue;
+			}
+			infomsg("waiting for drive to get ready...\n");
+			sleep(Autoloader);
+		} else {
+			fprintf(Terminal,"\nvolume full - insert new media and press return whe ready...\n");
+			tcflush(fileno(Terminal),TCIFLUSH);
+			fgetc(Terminal);
+			fprintf(Terminal,"\nOK - continuing...\n");
+		}
+		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|O_SYNC,0666)))
+			errormsg("error reopening output file: %s\n",strerror(errno));
+	} while (-1 == Out);
 	infomsg("continuing with next volume\n");
-	if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|O_SYNC,0666))) {
-		errormsg("error reopening output file: %s\n",strerror(errno));
-		Finish = 1;
-		pthread_exit((void *) -1);
-	}
 }
 
 void checkIncompleteOutput()
@@ -399,7 +405,7 @@ void outputThread()
 	}
 }
 
-#ifdef EXPERIMENTAL
+#ifdef NETWORKING
 void openNetworkInput(const char *host, unsigned short port)
 {
 	struct sockaddr_in saddr, caddr;
@@ -417,7 +423,7 @@ void openNetworkInput(const char *host, unsigned short port)
 		fatal("could not create socket for network input: %s\n",strerror(errno));
 	bzero((void *) &saddr, sizeof(saddr));
 	if (host) {
-		debugmsg("resolving client hostname...\n");
+		debugmsg("resolving hostname of input interface...\n");
 		if (0 == (h = gethostbyname(host)))
 			fatal("could not resolve server hostname!\n");	/* here should be a h_errno printout */
 		saddr.sin_family = h->h_addrtype;
@@ -507,11 +513,9 @@ void usage()
 #endif
 		"-p <num>   : start writing after buffer has been filled <num>%%\n"
 		"-i <file>  : use <file> for input\n"
-#ifdef EXPERIMENTAL
-		"-I <port>  : use network port <port> as input\n"
-#endif
 		"-o <file>  : use <file> for output\n"
-#ifdef EXPERIMENTAL
+#ifdef NETWORKING
+		"-I <port>  : use network port <port> as input\n"
 		"-O <h:p>   : output data to host <h> and port <p>\n"
 #endif
 #ifdef MULTIVOLUME
@@ -576,7 +580,7 @@ int main(int argc, const char **argv)
 	struct stat st;
 	int setOutsize = 0;
 #endif
-#ifdef EXPERIMENTAL
+#ifdef NETWORKING
 	unsigned short netPortIn = 0;
 	const char *server = 0, *client = 0;
 	unsigned short netPortOut = 0;
@@ -617,7 +621,7 @@ int main(int argc, const char **argv)
 		} else if (!argcheck("-i",argv,&c)) {
 			Infile = argv[c];
 			debugmsg("Infile set to %s\n",Infile);
-#ifdef EXPERIMENTAL
+#ifdef NETWORKING
 		} else if (!argcheck("-I",argv,&c)) {
 			getNetVars(argv,&c,&client,&netPortIn);
 			debugmsg("Network input set to %s:%hu\n",client,netPortIn);
@@ -625,7 +629,7 @@ int main(int argc, const char **argv)
 		} else if (!argcheck("-o",argv,&c)) {
 			Outfile = argv[c];
 			debugmsg("Outfile set to %s\n",Outfile);
-#ifdef EXPERIMENTAL
+#ifdef NETWORKING
 		} else if (!argcheck("-O",argv,&c)) {
 			getNetVars(argv,&c,&server,&netPortOut);
 			debugmsg("Output: server = %s, port = %hu\n",server,netPortOut);
@@ -691,7 +695,7 @@ int main(int argc, const char **argv)
 	if (Autoloader)
 		if ((!Outfile) && (!Infile))
 			fatal("Setting autoloader time without using a device doesn't make any sense!\n");
-#ifdef EXPERIMENTAL
+#ifdef NETWORKING
 	if (Infile && netPortIn)
 		fatal("Setting both network input port and input file doesn't make sense!\n");
 	if (Outfile && netPortOut)
@@ -745,19 +749,19 @@ int main(int argc, const char **argv)
 	for (c = 1; c < Numblocks; c++)
 		Buffer[c] = Buffer[0] + Blocksize * c;
 
-	debugmsg("creating semaphore...\n");
+	debugmsg("creating semaphores...\n");
 	if (0 != sem_init(&Buf2Dev,0,0))
-		fatal("Error creating semaphore: %s\n",strerror(errno));
+		fatal("Error creating semaphore Buf2Dev: %s\n",strerror(errno));
 	if (0 != sem_init(&Dev2Buf,0,Numblocks))
-		fatal("Error creating semaphore: %s\n",strerror(errno));
+		fatal("Error creating semaphore Dev2Buf: %s\n",strerror(errno));
 	if (0 != sem_init(&Percentage,0,0))
-		fatal("Error creating semaphore: %s\n",strerror(errno));
+		fatal("Error creating semaphore Percentage: %s\n",strerror(errno));
 
 	debugmsg("opening streams...\n");
 	if (Infile) {
 		if (-1 == (In = open(Infile,O_RDONLY)))
 			fatal("could not open input file: %s\n",strerror(errno));
-#ifdef EXPERIMENTAL
+#ifdef NETWORKING
 	} else if (netPortIn) {
 		openNetworkInput(client,netPortIn);
 #endif
@@ -766,7 +770,7 @@ int main(int argc, const char **argv)
 	if (Outfile) {
 		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|O_SYNC,0666)))
 			fatal("could not open output file: %s\n",strerror(errno));
-#ifdef EXPERIMENTAL
+#ifdef NETWORKING
 	} else if (netPortOut) {
 		openNetworkOutput(server,netPortOut);
 #endif
@@ -795,14 +799,12 @@ int main(int argc, const char **argv)
 		   "using multiple volumes. Continue at your own risc!\n");
 #endif
 
-	if (Status) {
-		debugmsg("accessing terminal...\n");
-		Terminal = fopen("/dev/tty","r+");
-		if (!Terminal) {
-			errormsg("could not open terminal: %s\n",strerror(errno));
-			warningmsg("no multi volume support");
-			Status = 0;
-		}
+	debugmsg("accessing terminal...\n");
+	Terminal = fopen("/dev/tty","r+");
+	if (!Terminal) {
+		errormsg("could not open terminal: %s\n",strerror(errno));
+		warningmsg("multi volume support turned off");
+		Status = 0;
 	}
 
 	debugmsg("registering signals...\n");

@@ -52,6 +52,8 @@ therefore be fairly stable out of the box. To use it
 you should know the basics of TCP/IP. Use only
 on a trusted LAN, as there is no builtin security.
 This code is known to not compile on Tru64.
+Use configure option --enable-networking to include
+this code.
 
 
 TESTING:
@@ -81,6 +83,7 @@ huge blocksize.
 
 TODO:
 =====
+# make networking compile under tru64
 # fix: warnings for tru64 compilation
 # fix: unknown bugs
 
