@@ -488,6 +488,11 @@ int main(int argc, char **argv)
 		Blocksize = totalmem / Numblocks;
 		infomsg("blocksize set to %i\n",Blocksize);
 	}
+#ifdef EXPERIMENTAL
+	/* multi volume input consistency checking */
+	if ((Multivolume) && (!Infile))
+		fatal("multi volume support for input needs an explicit given input device (option -i)\n");
+#endif
 
 	/* create buffer */
 	Buffer = (char **) malloc(Numblocks * sizeof(char *));

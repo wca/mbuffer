@@ -1,4 +1,4 @@
-.TH "mbuffer" "1" "20010208" "Thomas Maier-Komor" "console utility"
+.TH "mbuffer" "1" "20010515" "Thomas Maier-Komor" "console utility"
 .SH "NAME"
 mbuffer \- measuring buffer
 .SH "SYNTAX"
@@ -24,6 +24,9 @@ use blocks of \fIsize\fP bytes for buffer (default 10240)
 .TP 
 \fB\-m\fR <\fIsize\fP>
 use a total of \fIsize\fP bytes for buffer (default 2MB)
+.TP 
+\fB\-n\fR <\fInum\fP>
+\fInum\fP volumes in input device (requires use of option -i for input device specification) [currently multi volume support is EXPERIMENTAL]
 .TP 
 \fB\-t\fR
 use a memory mapped temporaray file as buffer (use with huge buffers)
@@ -61,13 +64,21 @@ Output version information and exit.
 \fI/tmp/mbuffer*\fP 
 .SH "EXAMPLES"
 .LP 
-To run this program with the default options just type
+To run this program with the default options just type:
 .LP 
 mbuffer
 .LP 
 Using mbuffer to do a backup with tar to the default tape device. Options for this example: memory mapped temporary file with a size of 10 Megabytes, start after 80% of the buffer have been filled.
 .LP 
 tar cf \- mydirectory | gzip | mbuffer \-t \-m 10M \-p 80 > $TAPE
+.LP
+Using mbuffer with 3 tapes for input and extracting the contents in the current work directory (EXPERIMENTAL):
+.LP
+mbuffer -n 3 -i $TAPE | gzip -dc | tar xf -
+.LP
+Using mbuffer to write to multiple tape volumes:
+.LP
+tar cf - /usr | mbuffer -o $TAPE
 .SH "AUTHORS"
 .LP 
 Thomas Maier\-Komor <software@maier\-komor.de>

@@ -1,3 +1,7 @@
+20010515:
+- Docu update concerning usage of multi volume support
+- multi volume options consistency checking added
+
 20010509:
 - summary is now also displayed upon break and terminate
 - bugfix: summary overflow
