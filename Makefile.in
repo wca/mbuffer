@@ -1,0 +1,23 @@
+CC	= @CC@
+CFLAGS	= @CFLAGS@ $(DEFS)
+DEFS	= @DEFS@
+LDFLAGS	= @LDFLAGS@
+LIBS	= @LIBS@
+
+RM	= @RM@
+TARGET	= mbuffer
+
+SOURCES	= mbuffer.c
+OBJECTS	= $(SOURCES:.c=.o)
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	$(CC) $(LDFLAGS) $(LIBS) $< -o $@
+
+clean:
+	$(RM) -f *.o
+
+distclean: clean
+	$(RM) -f $(TARGET) config.h config.cache config.log \
+	config.status *~ Makefile out

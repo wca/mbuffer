@@ -1,0 +1,46 @@
+m(easuring)buffer version 20010118
+==================================
+AUTHOR: Thomas Maier-Komor
+e-mail: software@maier-komor.de
+
+
+LICENSE:
+========
+GNU GPL 2 (see COPYING for details)
+
+
+DESCRIPTION:
+============
+mbuffer is a raplacement for buffer with additional functionality:
+
+# display of i/o speed
+# optional use of memory mapped i/o for huge buffers
+# multithreaded instead of sharedmemory ipc
+# compatible command-line options
+# --? bugs to hunt ?-- :-((
+
+
+TESTING:
+========
+to test the program I do the following:
+# tar cf - /usr | mbuffer | tar tf - > out
+# tar cf - /usr | mbuffer -h | tar tf - > out
+
+
+ARCHITECTURES:
+==============
+This software has been tested under the following operatingsystems:
+- linux 2.2.x
+- linux 2.4.x
+- solaris 8
+- tru64
+
+
+TODO:
+=====
+# fix: show status on tru64 and solaris
+# fix: warnings for tru64 compilation
+# if the need comes up (mail me) the outputThread should
+  be modified to do write's with the favorite size of
+  the output device
+# fix: unknown bugs
