@@ -1,20 +1,11 @@
 AC_INIT(mbuffer.c)
-PACKAGE=mbuffer
-VERSION=20011008
+AC_CONFIG_HEADER(config.h)
+
 AC_CANONICAL_SYSTEM
-AM_INIT_AUTOMAKE(${PACKAGE},${VERSION})
-AM_CONFIG_HEADER(config.h)
 
+PACKAGE=mbuffer
+VERSION=20050124
 
-missing_dir=`cd $ac_aux_dir && pwd`
-AM_MISSING_PROG(ACLOCAL, aclocal, $missing_dir)
-AM_MISSING_PROG(AUTOCONF, autoconf, $missing_dir)
-AM_MISSING_PROG(AUTOMAKE, automake, $missing_dir)
-AM_MISSING_PROG(AUTOHEADER, autoheader, $missing_dir)
-AM_MISSING_PROG(MAKEINFO, makeinfo, $missing_dir)
-#AM_MISSING_PROG(LIBTOOL, libtool, $missing_dir)
-
-ALL_LINGUAS="de"
 AC_PREFIX_DEFAULT(/usr/local)
 test "$prefix" = NONE && prefix=/usr/local
 test "$exec_prefix" = NONE && exec_prefix=$prefix
@@ -27,8 +18,6 @@ AC_PROG_INSTALL
 AC_PATH_PROG(RM,rm)
 AC_PATH_PROG(STRIP,strip)
 AC_PATH_PROG(LN,ln)
-#AC_PATH_PROG(LIBTOOL,libtool)
-AM_GNU_GETTEXT
 
 AC_CHECK_LIB(pthread,pthread_attr_init,,AC_MSG_ERROR(you need the pthread library!))
 AC_SEARCH_LIBS(sem_init,rt posix,,AC_MSG_ERROR(could not find semaphore functions!))
@@ -36,23 +25,12 @@ AC_PATH_PROG(MT,mt,AC_MSG_WARN(could not find the program mt - you might need th
 
 if test -n "$GCC"; then
         CFLAGS="$CFLAGS -Wall"
-        CXXFLAGS="$CXXFLAGS -Wall"
         case "$target_cpu" in
-                i386*)
-                CFLAGS="$CFLAGS -march=i386"
-                CXXFLAGS="$CXXFLAGS -march=i386"
-                ;;
-                i486*)
-                CFLAGS="$CFLAGS -march=i486"
-                CXXFLAGS="$CXXFLAGS -march=i486"
-                ;;
                 i586*)
                 CFLAGS="$CFLAGS -march=pentium"
-                CXXFLAGS="$CXXFLAGS -march=pentium"
                 ;;
                 i686*)
                 CFLAGS="$CFLAGS -march=pentiumpro"
-                CXXFLAGS="$CXXFLAGS -march=pentiumpro"
                 ;;
         esac
 fi
@@ -64,39 +42,29 @@ AC_HEADER_STDC
 AC_CHECK_FUNCS(strerror memcpy)
 AC_CHECK_HEADERS(unistd.h memory.h)
 AC_STRUCT_ST_BLKSIZE
+AC_SEARCH_LIBS(socket,socket,,AC_MSG_ERROR(could not find the library containing network functions!))
+AC_SEARCH_LIBS(gethostbyname,nsl,,AC_MSG_ERROR(could not find the library containing name convertion functions!))
+AC_SEARCH_LIBS(hstrerror,resolv,,AC_MSG_ERROR(could not find the library containing hstrerror))
+
 
 AC_ARG_ENABLE(debug,
-        --enable-debug            enable verbose logging to console for debugging purpose,
-        AC_DEFINE_UNQUOTED(DEBUG),
-	AC_DEFINE_UNQUOTED(NDEBUG)
+        --disable-debug           disable verbose logging to console for debugging purpose,
+        ,AC_DEFINE_UNQUOTED(DEBUG),
         )
 
-AC_ARG_ENABLE(multi-volume,
-	--disable-multi-volume    disable multi-volume support,
-	,AC_DEFINE_UNQUOTED(MULTIVOLUME))
-
-AC_ARG_ENABLE(networking,
-        --enable-networking       enable networking code,
-        AC_DEFINE_UNQUOTED(NETWORKING)
-	AC_SEARCH_LIBS(socket,socket,,
-		AC_MSG_ERROR(could not find the library containing network functions!))
-	AC_SEARCH_LIBS(gethostbyname,nsl,,
-		AC_MSG_ERROR(could not find the library containing name convertion functions!))
-	AC_SEARCH_LIBS(hstrerror,resolv,,
-		AC_MSG_ERROR(could not find the library containing hstrerror))
-	,)
+AC_ARG_ENABLE(md5,
+        --disable-md5             disable md5 hash generation,
+	,
+	AC_SEARCH_LIBS(mhash_init,mhash,AC_DEFINE_UNQUOTED(MHASH),
+		AC_SEARCH_LIBS(MD5Init,md5,AC_DEFINE_UNQUOTED(MD5),AC_MSG_WARN(could not find the mhash library containing the md5 hash functions - md5 support disabled)))
+	)
 
 AC_SUBST(DEBUG)
-AC_SUBST(NDEBUG)
-AC_SUBST(MULTIVOLUME)
-AC_SUBST(NETWORKING)
 AC_DEFINE_UNQUOTED(PACKAGE,"${PACKAGE}")
 AC_DEFINE_UNQUOTED(VERSION,"${VERSION}")
 AC_SUBST(PACKAGE)
 AC_SUBST(VERSION)
-AC_SUBST(ACLOCAL)
 AC_SUBST(AUTOCONF)
-AC_SUBST(AUTOMAKE)
 AC_DEFINE(_REENTRANT,1,Needed for thread safe compilation)
 
-AC_OUTPUT(Makefile intl/Makefile po/Makefile.in mbuffer.1)
+AC_OUTPUT(Makefile mbuffer.1)

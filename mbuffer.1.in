@@ -47,8 +47,11 @@ as \-t but use \fIfile\fP instead
 \fB\-d\fR
 use blocksize of device for output (needed for some devices, slows output down)
 .TP 
-\fB\-p\fR <\fInum\fP>
+\fB\-P\fR <\fInum\fP>
 start writing after the buffer has been filled to \fInum\fP% (default 0 \- start at once)
+.TP 
+\fB\-p\fR <\fInum\fP>
+start reading after the buffer has dropped below fillratio of \fInum\fP% (default 100 \- start at once)
 .TP 
 \fB\-l\fR <\fIfile\fP>
 log messages to \fIfile\fP instead of standard error output
@@ -70,6 +73,9 @@ quiet \- do not display the status on the standard error output
 .TP 
 \fB\-\-help\fR
 Output help information and exit.
+.TP 
+\fB\-\-md5\fR
+Generate md5 hash of transfered data.
 .TP 
 \fB\-\-version\fR
 Output version information and exit.

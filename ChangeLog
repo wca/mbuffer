@@ -1,3 +1,33 @@
+20050125:
+- fixed operation of low watermark (-p)
+- made printf formating more standard conforming
+- start output before input thread
+- more minor fixes
+
+20050124 (unannounced interims version):
+- fixed summary bug reported
+- kicked automake
+- removed locale support (too much work to support properly)
+- changed debugmsg to a C99 macro, if debugging is switched off
+- fix: final newline of statusThread was printf()ed to stderr instead 
+  of Terminal
+- fix: potential incorrect written last block
+- fixed warnings: comparison of signed and unsigned
+- beautified summary
+- added low watermark (request by Greg Freemyer)
+  (restarts reading if dropped below - needed for FAST streamers;
+   I don't have such a beast and I never expected such a thing to exist...)
+  WARNING: changed argument -p to represent low watermark (was high watermark)
+           so that both options are easier to remember
+- eliminated dead code
+- changed status of networking code to stable
+- removed NDEBUG from config.h and configure, because assert()s are
+  always "a good thing TM"
+- encapsulated Terminal I/O within Mutex
+- md5 hashing option added (disabled by default, proposal by Greg Freemyer),
+  using either mhash or md5 library, whatever is available
+- some more cleanups
+
 20011008:
 - more detailed errormsg for host name resolving
 - beautified some messages
