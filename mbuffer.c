@@ -20,9 +20,14 @@ int Verbose = 3, Finish = 0, In, Out, Tmp, Rest = 0, Numin = 0,
     Numout = 0, Pause = 0, Memmap = 0, Status = 1, Outsize = 0;
 float Start = 0;
 char *Tmpfile = 0, **Buffer;
+const char *Infile = 0;
 int Blocksize = 10240, Numblocks = 256;
+#ifdef EXPERIMENTAL
+int Multivolume = 0;
+#endif
 sem_t Dev2Buf,Buf2Dev;
 FILE *Log = 0, *Terminal = 0;
+struct timeb Starttime;
 
 
 void debugmsg(const char *msg, ...)
@@ -86,12 +91,27 @@ void fatal(const char *msg, ...)
 
 void terminate()
 {
+	float diff,out;
+	struct timeb now;
+
 	infomsg("\rterminating...\n");
-	if (Status)
-		fprintf(stderr,"\n");
 	pthread_cancel(Reader);
 	pthread_cancel(Writer);
+
+	pthread_join(Reader,0);
+	pthread_join(Writer,0);
+	if (Memmap)
+		munmap(Buffer[0],Blocksize*Numblocks);
+	close(Tmp);
 	remove(Tmpfile);
+	if (Status) {
+		ftime(&now);
+		diff = now.time - Starttime.time + (float) now.millitm / 1000 - (float) Starttime.millitm / 1000;
+		out = (float)(((long long) Numout * Blocksize) >> 10) / diff;
+		fprintf(Terminal,"\nsummary: %i kB in %.1f sec - %.1f kB/sec average\n",
+			(int) ((long long) Numout * Blocksize) >> 10,
+			diff, out );
+	}
 	exit(0);
 }
 
@@ -109,13 +129,13 @@ RETSIGTYPE sigHandler(int signr)
 
 void statusThread() 
 {
-	struct timeb start, last, now;
+	struct timeb last, now;
 	float in = 0, out = 0, diff, fill;
 	int total, rest, lin = 0, lout = 0;
 
-	ftime(&start);
-	last.time = start.time;
-	last.millitm = start.millitm;
+	ftime(&Starttime);
+	last.time = Starttime.time;
+	last.millitm = Starttime.millitm;
 	usleep(1000);	// needed on alpha (stderr fails with fpe on nan)
 	sem_getvalue(&Buf2Dev,&rest);
 	while (!(Finish & (rest == 0))) {
@@ -145,13 +165,30 @@ void statusThread()
 		munmap(Buffer[0],Blocksize*Numblocks);
 	close(Tmp);
 	remove(Tmpfile);
-	diff = now.time - start.time + (float) now.millitm / 1000 - (float) start.millitm / 1000;
-	out = (((float) Numout * Blocksize) / 1024) / diff;
+	diff = now.time - Starttime.time + (float) now.millitm / 1000 - (float) Starttime.millitm / 1000;
+	out = (float)(((long long) Numout * Blocksize) >> 10) / diff;
 	fprintf(Terminal,"summary: %i kB in %.1f sec - %.1f kB/sec average\n",
 		(int) ((long long) Numout * Blocksize) >> 10,
 		diff, out );
 	exit(0);
 }
+
+#ifdef EXPERIMENTAL
+void requestVolume()
+{
+	close(In);
+	fprintf(Terminal,"\ninsert next volume...");
+	fflush(Terminal);
+	tcflush(fileno(Terminal),TCIFLUSH);
+	fgetc(Terminal);
+	fprintf(Terminal,"\nOK - continuing...");
+	Multivolume--;
+	if (-1 == (In = open(Infile,O_RDONLY))) {
+		errormsg("could not reopen input: %s\n",strerror(errno));
+		pthread_exit((void *)-1);
+	}
+}
+#endif
 
 void inputThread()
 {
@@ -165,6 +202,11 @@ void inputThread()
 		do {
 			debugmsg("inputThread: read %i\n",num);
 			err = read(In,Buffer[at] + num,Blocksize - num);
+#ifdef EXPERIMENTAL
+			if ((!err) && (Terminal) && (Multivolume)) {
+				requestVolume();
+			} else
+#endif
 			if (-1 == err) {
 				errormsg("\ninputThread: error reading: %s\n",strerror(errno));
 				Finish = 1;
@@ -303,6 +345,9 @@ void usage()
 		"-p <num>   : start writing after buffer has been filled <num>%%\n"
 		"-i <file>  : use <file> for input\n"
 		"-o <file>  : use <file> for output\n"
+#ifdef EXPERIMENTAL
+		"-n <num>   : <num> volumes for input\n"
+#endif
 		"-T <file>  : as -t but uses <file> as buffer\n"
 		"-l <file>  : use <file> for logging messages\n"
 		"-u <num>   : pause <num> microseconds after each write\n"
@@ -356,7 +401,7 @@ int argcheck(const char *opt, char **argv, int *c)
 int main(int argc, char **argv)
 {
 	int c, nooverwrite = O_EXCL, totalmem = 0;
-	const char *inFile = 0, *outFile = 0;
+	const char *outFile = 0;
 	int optMset = 0, optSset = 0, optBset = 0;
 #ifdef HAVE_ST_BLKSIZE
 	struct stat st;
@@ -382,9 +427,16 @@ int main(int argc, char **argv)
 		} else if (!argcheck("-u",argv,&c)) {
 			Pause = (atoi(argv[c])) ? (atoi(argv[c])) : Pause;
 			debugmsg("Pause set to %i\n",Pause);
+#ifdef EXPERIMENTAL
+		} else if (!argcheck("-n",argv,&c)) {
+			Multivolume = atoi(argv[c]) - 1;
+			if (Multivolume <= 0)
+				fatal("argument for number of volumes must be > 0\n");
+			debugmsg("Multivolume set to %i\n",Multivolume);
+#endif
 		} else if (!argcheck("-i",argv,&c)) {
-			inFile = argv[c];
-			debugmsg("inFile set to %s\n",inFile);
+			Infile = argv[c];
+			debugmsg("Infile set to %s\n",Infile);
 		} else if (!argcheck("-o",argv,&c)) {
 			outFile = argv[c];
 			debugmsg("outFile set to %s\n",outFile);
@@ -477,8 +529,8 @@ int main(int argc, char **argv)
 		fatal("Error creating semaphore: %s\n",strerror(errno));
 
 	debugmsg("opening streams...\n");
-	if (inFile) {
-		if (-1 == (In = open(inFile,O_RDONLY)))
+	if (Infile) {
+		if (-1 == (In = open(Infile,O_RDONLY)))
 			fatal("could not open input file: %s\n",strerror(errno));
 	} else
 		In = fileno(stdin);

@@ -1,3 +1,8 @@
+20010509:
+- summary is now also displayed upon break and terminate
+- bugfix: summary overflow
+- experimental feature: input of multiple volumes
+
 20010507:
 - status messages are now printed to the terminal not to stderr
 - Bugfix: for output blocksize code
