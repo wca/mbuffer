@@ -51,6 +51,7 @@ therefore be fairly stable out of the box. To use it
 you should know the basics of TCP/IP. Use only
 on a trusted LAN, as there is no builtin security
 up to now.
+This code is known to not compile on Tru64.
 
 
 TESTING:

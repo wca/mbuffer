@@ -27,7 +27,7 @@ int Sock = 0;
 pthread_t Reader, Writer;
 int Verbose = 3, Finish = 0, In, Out, Tmp, Rest = 0, Pause = 0, 
 	Memmap = 0, Status = 1, Outsize = 10240, Nooverwrite = O_EXCL, 
-	Numblocks = 256;
+	Numblocks = 256, Outblocksize = 0;
 unsigned long long Blocksize = 10240, Numin = 0, Numout = 0;
 float Start = 0;
 char *Tmpfile = 0, **Buffer;
@@ -121,7 +121,7 @@ void terminate()
 	if (Status) {
 		ftime(&now);
 		diff = now.time - Starttime.time + (float) now.millitm / 1000 - (float) Starttime.millitm / 1000;
-		out = (float)(((long long) Numout * Blocksize) >> 10) / diff;
+		out = (float)((Numout * Blocksize) >> 10) / diff;
 		fprintf(Terminal,"\nsummary: %Lu kB in %.1f sec - %.1f kB/sec average\n",
 			(Numout * Blocksize) >> 10,
 			diff, out );
@@ -167,7 +167,7 @@ void statusThread()
 		last.millitm = now.millitm;
 		total = (Numout * Blocksize) >> 10;
 		fill = (fill < 0) ? 0 : fill;
-		fprintf(Terminal,"\rin at %8.1f kB/sec - out at %8.1f kB/sec - %Lu kB totally transfered - buffer %3.0f%% full",in,out,total,fill);
+		fprintf(Terminal,"\r%8.1f kB/s in - %8.1f kB/s out - %Lu kB total - buffer %3.0f%% full",in,out,total,fill);
 		fflush(Terminal);
 		usleep(500000);
 		sem_getvalue(&Buf2Dev,&rest);
@@ -182,19 +182,20 @@ void statusThread()
 	remove(Tmpfile);
 	ftime(&now);
 	diff = now.time - Starttime.time + (float) now.millitm / 1000 - (float) Starttime.millitm / 1000;
-	out = (float)(((long long) Numout * Blocksize) >> 10) / diff;
+	out = (float)((Numout * Blocksize) >> 10) / diff;
 	fprintf(Terminal,"summary: %Lu kB in %.1f sec - %.1f kB/sec average\n",
 		(Numout * Blocksize) >> 10,
-		diff, out );
+		diff, out);
 	exit(0);
 }
 
 #ifdef MULTIVOLUME
 void requestInputVolume()
 {
+	debugmsg("requesting new volume for input\n");
 	close(In);
 	do {
-		fprintf(Terminal,"\ninsert next volume...");
+		fprintf(Terminal,"\ninsert next volume and press return to continue...");
 		fflush(Terminal);
 		tcflush(fileno(Terminal),TCIFLUSH);
 		fgetc(Terminal);
@@ -203,6 +204,7 @@ void requestInputVolume()
 	} while (In == -1);
 	Multivolume--;
 	fprintf(Terminal,"\nOK - continuing...");
+	fflush(Terminal);
 }
 #endif
 
@@ -226,7 +228,10 @@ void inputThread()
 #endif
 			if (-1 == err) {
 				errormsg("inputThread: error reading: %s\n",strerror(errno));
-				sem_post(&Buf2Dev);
+				if (num) {
+					Rest = num;
+					sem_post(&Buf2Dev);
+				}
 				sem_post(&Percentage);
 				Finish = 1;
 				infomsg("inputThread: exiting...\n");
@@ -270,6 +275,7 @@ void requestOutputVolume()
 		Finish = 1;
 		pthread_exit((void *) -1);
 	}
+	debugmsg("requesting new output volume\n");
 	close(Out);
 	fprintf(Terminal,"\nvolume full - insert new media and press return whe ready...\n");
 	tcflush(fileno(Terminal),TCIFLUSH);
@@ -281,11 +287,31 @@ void requestOutputVolume()
 		pthread_exit((void *) -1);
 	}
 }
+
+void checkIncompleteOutput()
+{
+	static int mulretry = 0;	/* well this isn't really good design,
+					   but better than a global variable */
+	
+	debugmsg("Outblocksize = %i, mulretry = %i\n",Outblocksize,mulretry);
+	if ((0 != mulretry) || (0 == Outblocksize)) {
+		requestOutputVolume();
+		debugmsg("resetting outputsize to normal\n");
+		if (0 != mulretry) {
+			Outsize = mulretry;
+			mulretry = 0;
+		}
+	} else {
+		debugmsg("setting to new outputsize (end of device)\n");
+		mulretry = Outsize;
+		Outsize = Outblocksize;
+	}
+}
 #endif
 
 void outputThread()
 {
-	int at = 0, err, fill, num, rest;
+	int at = 0, err, fill, rest;
 	
 	infomsg("\noutputThread: starting...\n");
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS,0);
@@ -295,7 +321,6 @@ void outputThread()
 		if (Start && (!fill))
 			sem_wait(&Percentage);
 		sem_wait(&Buf2Dev);
-		num = 0;
 		if (Finish) {
 			debugmsg("outputThread: inputThread finished, %i blocks remaining\n",fill);
 			sem_getvalue(&Buf2Dev,&fill);
@@ -309,12 +334,15 @@ void outputThread()
 		}
 		rest = Blocksize;
 		do {
-			debugmsg("outputThread: write %i\n",-num);
-			/* use Outsize which is the blocksize of the device */
-			err = write(Out,Buffer[at] + num, rest > Outsize ? Outsize : rest );
+			/* use Outsize which could be the blocksize of the device (option -d) */
+			err = write(Out,Buffer[at] + Blocksize - rest, rest > Outsize ? Outsize : rest);
+			debugmsg("outputThread: write(Out,Buffer[%i]+%i,%i) = %i\t(rest = %i)\n",at,Blocksize - rest,rest > Outsize ? Outsize : rest, err, rest);
 #ifdef MULTIVOLUME
 			if ((-1 == err) && (Terminal) && ((errno == ENOMEM) || (errno == ENOSPC))) {
-				requestOutputVolume();
+				/* request a new volume - but first check
+				 * wheather we are really at the
+				 * end of the device */
+				checkIncompleteOutput();
 				continue;
 			} else if (-1 == err) {
 #else
@@ -345,7 +373,6 @@ void outputThread()
 }
 
 #ifdef EXPERIMENTAL
-
 void openNetworkInput(unsigned short port)
 {
 	struct sockaddr_in saddr, caddr;
@@ -408,7 +435,6 @@ void getNetVars(const char **argv, int *c, const char **server, unsigned short *
 	if (*port)
 		(*c)++;
 }
-
 #endif
 
 void version()
@@ -431,6 +457,9 @@ void usage()
 #ifdef HAVE_MMAP
 		"-t         : use memory mapped temporary file (for huge buffer)\n"
 #endif
+#ifdef HAVE_ST_BLKSIZE
+		"-d         : use blocksize of device for output\n"
+#endif
 		"-p <num>   : start writing after buffer has been filled <num>%%\n"
 		"-i <file>  : use <file> for input\n"
 #ifdef EXPERIMENTAL
@@ -442,7 +471,6 @@ void usage()
 #endif
 #ifdef MULTIVOLUME
 		"-n <num>   : <num> volumes for input\n"
-		"WARNING    : multi-volume code is supposed to be buggy for big devices\n"
 #endif
 		"-T <file>  : as -t but uses <file> as buffer\n"
 		"-l <file>  : use <file> for logging messages\n"
@@ -500,6 +528,7 @@ int main(int argc, const char **argv)
 	int c, optMset = 0, optSset = 0, optBset = 0;
 #ifdef HAVE_ST_BLKSIZE
 	struct stat st;
+	int setOutsize = 0;
 #endif
 #ifdef EXPERIMENTAL
 	unsigned short netPortIn = 0;
@@ -521,6 +550,11 @@ int main(int argc, const char **argv)
 			Numblocks = (atoi(argv[c])) ? (atoi(argv[c])) : Numblocks;
 			optBset = 1;
 			debugmsg("Numblocks set to %i\n",Numblocks);
+#ifdef HAVE_ST_BLKSIZE
+		} else if (!argcheck("-d",argv,&c)) {
+			setOutsize = 1;
+			debugmsg("setting output size according to the blocksize of the device\n");
+#endif
 		} else if (!argcheck("-v",argv,&c)) {
 			Verbose = (atoi(argv[c])) ? (atoi(argv[c])) : Verbose;
 			debugmsg("Verbose set to %i\n",Verbose);
@@ -623,7 +657,7 @@ int main(int argc, const char **argv)
 		fatal("Could not allocate enough memory!\n");
 #ifdef HAVE_MMAP
 	if (Memmap) {
-		infomsg("mapping temporary file to memory with %i blocks with %i byte (%i kB total)...\n",Numblocks,Blocksize,Numblocks*Blocksize/1024);
+		infomsg("mapping temporary file to memory with %i blocks with %Lu byte (%Lu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
 		if (!Tmpfile) {
 			Tmpfile = malloc(20*sizeof(char));
 			if (!Tmpfile)
@@ -646,7 +680,7 @@ int main(int argc, const char **argv)
 		debugmsg("temporary file mapped to address %p\n",Buffer[0]);
 	} else {
 #endif
-		infomsg("allocating memory for %i blocks with %i byte (%i kB total)...\n",Numblocks,Blocksize,Numblocks*Blocksize/1024);
+		infomsg("allocating memory for %i blocks with %Lu byte (%Lu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
 		Buffer[0] = (char *) malloc(Blocksize * Numblocks);
 #ifdef HAVE_MMAP
 	}
@@ -683,19 +717,25 @@ int main(int argc, const char **argv)
 		Out = fileno(stdout);
 
 #ifdef HAVE_ST_BLKSIZE
-	debugmsg("checking blocksize for output...\n");
+	debugmsg("checking output device...\n");
 	if (-1 == fstat(Out,&st))
 		fatal("could not stat output: %s\n",strerror(errno));
 	if ((st.st_mode & S_IFBLK) || (st.st_mode & S_IFCHR)) {
-		infomsg("blocksize on output device is %i\n",st.st_blksize);
+		infomsg("blocksize is %i bytes on output device\n",st.st_blksize);
 		if (Blocksize%st.st_blksize != 0)
-			warningmsg("Blocksize should be a multiple of the blocksize of the output device (is %i)!\n",st.st_blksize);
-		if (Blocksize > st.st_blksize) {
+			warningmsg("Blocksize should be a multiple of the blocksize of the output device (is %i)!\n"
+				   "This can cause corrupt data when writing to mulple volumes...\n",st.st_blksize);
+		Outblocksize = st.st_blksize;
+		if ((setOutsize) && (Blocksize > st.st_blksize)) {
 			infomsg("setting output blocksize to %i\n",st.st_blksize);
 			Outsize = st.st_blksize;
 		}
 	} else
 		infomsg("no device on output stream\n");
+#elif MULTIVOLUME
+	warningmsg("Could not stat output device (unsupported by system)!\n"
+		   "This can result in incorrect written data when\n"
+		   "using multiple volumes. Continue at your own risc!\n");
 #endif
 
 	if (Status) {

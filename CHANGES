@@ -1,3 +1,19 @@
+20010702:
+- corrected message for mem-allocation
+- added warning message for certain multi-volume use
+- enhanced debugging messages
+- (hopefully) last bugfix for multi-volume code
+
+20010628:
+- added Option -d to use blocksize of output device
+  for write (was default behaviour, but isn't needed
+  in most cases and slows data transfer down)
+- changed statusline (proposal by Dan Hollis)
+- minor bugfix for handling read errors (size of
+  writable block fragment is now set correctly)
+  [probably nobody ever cares anyway]
+- updates for experimental networking (configure)
+
 20010626:
 - bugfix: mbuffer didn't work anymore with pipes due
   to incorrect set Outsize (0)
