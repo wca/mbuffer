@@ -645,7 +645,7 @@ test "$exec_prefix" = NONE && exec_prefix=$prefix
 
 PACKAGE=mbuffer
 
-VERSION=20010619
+VERSION=20010621
 cat >> confdefs.h <<EOF
 #define VERSION "${VERSION}"
 EOF

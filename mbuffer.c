@@ -508,10 +508,12 @@ int main(int argc, char **argv)
 			if (!Tmpfile)
 				fatal("out of memory.\n");
 			strcpy(Tmpfile,"/tmp/mbuffer-XXXXXX");
+			Tmp = mkstemp(Tmpfile);
+		} else {
+			Tmp = open(Tmpfile,O_RDWR|O_CREAT|O_EXCL);
 		}
-		Tmp = mkstemp(Tmpfile);
 		if (-1 == Tmp)
-			fatal("could not create temporary file (%s): %s\n",tmpfile,strerror(errno));
+			fatal("could not create temporary file (%s): %s\n",Tmpfile,strerror(errno));
 		/* resize the file. Needed - at least under linux, who knows why? */
 		if (-1 == lseek(Tmp,Numblocks*Blocksize-sizeof(int),SEEK_SET))
 			fatal("could not resize temporary file: %s\n",strerror(errno));
