@@ -644,8 +644,8 @@ test "$prefix" = NONE && prefix=/usr/local
 test "$exec_prefix" = NONE && exec_prefix=$prefix
 
 PACKAGE=mbuffer
+VERSION=20010703
 
-VERSION=20010702
 cat >> confdefs.h <<EOF
 #define VERSION "${VERSION}"
 EOF
@@ -1913,34 +1913,34 @@ else :
   { echo "configure: error: could not find the library containing network functions!" 1>&2; exit 1; }
 fi
 	
-echo $ac_n "checking for library containing inet_pton""... $ac_c" 1>&6
-echo "configure:1918: checking for library containing inet_pton" >&5
-if eval "test \"`echo '$''{'ac_cv_search_inet_pton'+set}'`\" = set"; then
+echo $ac_n "checking for library containing gethostbyname""... $ac_c" 1>&6
+echo "configure:1918: checking for library containing gethostbyname" >&5
+if eval "test \"`echo '$''{'ac_cv_search_gethostbyname'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   ac_func_search_save_LIBS="$LIBS"
-ac_cv_search_inet_pton="no"
+ac_cv_search_gethostbyname="no"
 cat > conftest.$ac_ext <<EOF
 #line 1925 "configure"
 #include "confdefs.h"
 /* Override any gcc2 internal prototype to avoid an error.  */
 /* We use char because int might match the return type of a gcc2
     builtin and then its argument prototype would still apply.  */
-char inet_pton();
+char gethostbyname();
 
 int main() {
-inet_pton()
+gethostbyname()
 ; return 0; }
 EOF
 if { (eval echo configure:1936: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
   rm -rf conftest*
-  ac_cv_search_inet_pton="none required"
+  ac_cv_search_gethostbyname="none required"
 else
   echo "configure: failed program was:" >&5
   cat conftest.$ac_ext >&5
 fi
 rm -f conftest*
-test "$ac_cv_search_inet_pton" = "no" && for i in nsl; do
+test "$ac_cv_search_gethostbyname" = "no" && for i in nsl; do
 LIBS="-l$i  $ac_func_search_save_LIBS"
 cat > conftest.$ac_ext <<EOF
 #line 1947 "configure"
@@ -1948,15 +1948,15 @@ cat > conftest.$ac_ext <<EOF
 /* Override any gcc2 internal prototype to avoid an error.  */
 /* We use char because int might match the return type of a gcc2
     builtin and then its argument prototype would still apply.  */
-char inet_pton();
+char gethostbyname();
 
 int main() {
-inet_pton()
+gethostbyname()
 ; return 0; }
 EOF
 if { (eval echo configure:1958: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
   rm -rf conftest*
-  ac_cv_search_inet_pton="-l$i"
+  ac_cv_search_gethostbyname="-l$i"
 break
 else
   echo "configure: failed program was:" >&5
@@ -1967,9 +1967,9 @@ done
 LIBS="$ac_func_search_save_LIBS"
 fi
 
-echo "$ac_t""$ac_cv_search_inet_pton" 1>&6
-if test "$ac_cv_search_inet_pton" != "no"; then
-  test "$ac_cv_search_inet_pton" = "none required" || LIBS="$ac_cv_search_inet_pton $LIBS"
+echo "$ac_t""$ac_cv_search_gethostbyname" 1>&6
+if test "$ac_cv_search_gethostbyname" != "no"; then
+  test "$ac_cv_search_gethostbyname" = "none required" || LIBS="$ac_cv_search_gethostbyname $LIBS"
   
 else :
   { echo "configure: error: could not find the library containing name convertion functions!" 1>&2; exit 1; }

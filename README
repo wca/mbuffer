@@ -49,8 +49,7 @@ NETWORKING (EXPERIMENTAL):
 The included networking code is based on TCP and should
 therefore be fairly stable out of the box. To use it
 you should know the basics of TCP/IP. Use only
-on a trusted LAN, as there is no builtin security
-up to now.
+on a trusted LAN, as there is no builtin security.
 This code is known to not compile on Tru64.
 
 

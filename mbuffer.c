@@ -7,6 +7,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
 #include <string.h>
 #include <sys/timeb.h>
 #include <sys/mman.h>
@@ -18,6 +19,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -135,9 +137,11 @@ RETSIGTYPE sigHandler(int signr)
 	case SIGINT:
 		infomsg("\rcatched INT signal...\n");
 		terminate();
+		break;
 	case SIGTERM:
 		infomsg("\rcatched TERM signal...\n");
 		terminate();
+		break;
 	}
 }
 
@@ -219,8 +223,8 @@ void inputThread()
 		sem_wait(&Dev2Buf);
 		num = 0;
 		do {
-			debugmsg("inputThread: read %i\n",num);
 			err = read(In,Buffer[at] + num,Blocksize - num);
+			debugmsg("inputThread: read(In, Buffer[%i] + %i, %Lu) = %i\n", at, num, Blocksize - num, err);
 #ifdef MULTIVOLUME
 			if ((!err) && (Terminal) && (Multivolume)) {
 				requestInputVolume();
@@ -277,7 +281,8 @@ void requestOutputVolume()
 	}
 	debugmsg("requesting new output volume\n");
 	close(Out);
-	fprintf(Terminal,"\nvolume full - insert new media and press return whe ready...\n");
+	fprintf(Terminal,"\nWARNING: multivolume is known to be buggy in some situations...\n"
+			"volume full - insert new media and press return whe ready...\n");
 	tcflush(fileno(Terminal),TCIFLUSH);
 	fgetc(Terminal);
 	fprintf(Terminal,"\nOK - continuing...\n");
@@ -336,7 +341,7 @@ void outputThread()
 		do {
 			/* use Outsize which could be the blocksize of the device (option -d) */
 			err = write(Out,Buffer[at] + Blocksize - rest, rest > Outsize ? Outsize : rest);
-			debugmsg("outputThread: write(Out,Buffer[%i]+%i,%i) = %i\t(rest = %i)\n",at,Blocksize - rest,rest > Outsize ? Outsize : rest, err, rest);
+			debugmsg("outputThread: write(Out, Buffer[%i] + %i, %i) = %i\t(rest = %i)\n", at, Blocksize - rest, rest > Outsize ? Outsize : rest, err, rest);
 #ifdef MULTIVOLUME
 			if ((-1 == err) && (Terminal) && ((errno == ENOMEM) || (errno == ENOSPC))) {
 				/* request a new volume - but first check
@@ -373,18 +378,32 @@ void outputThread()
 }
 
 #ifdef EXPERIMENTAL
-void openNetworkInput(unsigned short port)
+void openNetworkInput(const char *host, unsigned short port)
 {
 	struct sockaddr_in saddr, caddr;
+#ifdef socklen_t
 	socklen_t clen;
+#else	
+	size_t clen;
+#endif
+	struct hostent *h = 0;
 
+	debugmsg("openNetworkInput(%s,%hu)\n",host,port);
 	infomsg("creating socket for network input...\n");
 	Sock = socket(AF_INET, SOCK_STREAM, 6);
 	if (0 > Sock)
-		fatal("could not crate socket for network input: %s\n",strerror(errno));
-	bzero(&saddr, sizeof(saddr));
-	saddr.sin_family = AF_INET;
-	saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+		fatal("could not create socket for network input: %s\n",strerror(errno));
+	bzero((void *) &saddr, sizeof(saddr));
+	if (host) {
+		debugmsg("resolving client hostname...\n");
+		if (0 == (h = gethostbyname(host)))
+			fatal("could not resolve server hostname!\n");	/* here should be a h_errno printout */
+		saddr.sin_family = h->h_addrtype;
+		memcpy(&saddr.sin_addr,h->h_addr_list[0],h->h_length);
+	} else {
+		saddr.sin_family = AF_INET;
+		saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	}
 	saddr.sin_port = htons(port);
 	infomsg("binding socket...\n");
 	if (0 > bind(Sock, (struct sockaddr *) &saddr, sizeof(saddr)))
@@ -401,17 +420,20 @@ void openNetworkInput(unsigned short port)
 void openNetworkOutput(const char *host, unsigned short port)
 {
 	struct sockaddr_in saddr;
+	struct hostent *h = 0;
 
+	debugmsg("openNetworkOutput(%s,%hu)\n",host,port);
 	infomsg("creating socket for network output...\n");
 	Out = socket(AF_INET, SOCK_STREAM, 6);
 	if (0 > Out)
-		fatal("could not crate socket for network output: %s\n",strerror(errno));
-	bzero(&saddr, sizeof(saddr));
-	saddr.sin_family = AF_INET;
+		fatal("could not create socket for network output: %s\n",strerror(errno));
+	bzero((void *) &saddr, sizeof(saddr));
 	saddr.sin_port = htons(port);
 	infomsg("resolving server host...\n");
-	if (0 > inet_pton(AF_INET, host, &saddr.sin_addr))
-		fatal("could not resolve server hostname: %s\n",strerror(errno));
+	if (0 == (h = gethostbyname(host)))
+		fatal("could not resolve server hostname!");	/* here should be a h_errno printout */
+	saddr.sin_family = h->h_addrtype;
+	memcpy(&saddr.sin_addr,h->h_addr_list[0],h->h_length);
 	infomsg("connecting to server (%x)...\n",saddr.sin_addr);
 	if (0 > connect(Out, (struct sockaddr *) &saddr, sizeof(saddr)))
 		fatal("could not connect to server: %s\n",strerror(errno));
@@ -429,6 +451,10 @@ void getNetVars(const char **argv, int *c, const char **server, unsigned short *
 		return;
 	}
 	free((void *) tmpserv);
+	if (0 != (*port = atoi(argv[*c]))) {
+		(*c)++;
+		return;
+	}
 	*server = argv[*c];
 	(*c)++;
 	*port = atoi(argv[*c]);
@@ -532,7 +558,7 @@ int main(int argc, const char **argv)
 #endif
 #ifdef EXPERIMENTAL
 	unsigned short netPortIn = 0;
-	const char *server = 0;
+	const char *server = 0, *client = 0;
 	unsigned short netPortOut = 0;
 #endif
 	
@@ -573,8 +599,8 @@ int main(int argc, const char **argv)
 			debugmsg("Infile set to %s\n",Infile);
 #ifdef EXPERIMENTAL
 		} else if (!argcheck("-I",argv,&c)) {
-			netPortIn = (atoi(argv[c])) ? (atoi(argv[c])): 0;
-			debugmsg("Network input set to port %hu\n",netPortIn);
+			getNetVars(argv,&c,&client,&netPortIn);
+			debugmsg("Network input set to %s:%hu\n",client,netPortIn);
 #endif
 		} else if (!argcheck("-o",argv,&c)) {
 			Outfile = argv[c];
@@ -629,9 +655,9 @@ int main(int argc, const char **argv)
 		if (Numblocks * Blocksize != totalmem)
 			fatal("inconsistent options: blocksize * number of blocks != totalsize!\n");
 	} else if ((!optBset&optSset&optMset) || (optMset&!optBset&!optSset)) {
-		if ((totalmem / Blocksize) >= (1 << 31))
+		if ((totalmem / Blocksize) >= (1LL << 31))
 			fatal("maximum number of managable blocks is %Li\n"
-				"Try a bigger blocksize!\n",1 << 31);
+				"Try a bigger blocksize!\n",1LL << 31);
 		Numblocks = totalmem / Blocksize;
 		infomsg("Numblocks set to %i\n",Numblocks);
 	} else if (optBset&!optSset&optMset) {
@@ -640,8 +666,12 @@ int main(int argc, const char **argv)
 	}
 #ifdef EXPERIMENTAL
 	if (Infile && netPortIn)
-		fatal("Setting both network input port and input file doesn't make sense!");
-	if ((netPortOut == 0) ^ (server == 0))
+		fatal("Setting both network input port and input file doesn't make sense!\n");
+	if (Outfile && netPortOut)
+		fatal("Setting both network output and output file doesn't make sense!\n");
+	if ((0 != client) && (0 == netPortIn))
+		fatal("You need to set a network port for network input!\n");
+	if ((0 == netPortOut) ^ (0 == server))
 		fatal("When sending data to a server, both servername and port must be set!\n");
 #endif
 
@@ -702,7 +732,7 @@ int main(int argc, const char **argv)
 			fatal("could not open input file: %s\n",strerror(errno));
 #ifdef EXPERIMENTAL
 	} else if (netPortIn) {
-		openNetworkInput(netPortIn);
+		openNetworkInput(client,netPortIn);
 #endif
 	} else
 		In = fileno(stdin);

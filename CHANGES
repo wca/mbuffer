@@ -1,3 +1,10 @@
+20010703:
+- update for debug messages
+- update for experimental network code
+  (interface selection is now possible,
+   hostnames are resolved correctly and more;
+   seems like getting stable...)
+
 20010702:
 - corrected message for mem-allocation
 - added warning message for certain multi-volume use
