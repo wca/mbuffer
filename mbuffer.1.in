@@ -14,9 +14,15 @@ mbuffer buffers i/o operations and displays the throughput rate. It is multithre
 use \fIfilename\fP as input instead of the standard input (needs to be
 given for multi volume support)
 .TP 
+\fB\-I\fR <\fIport\fP>
+use network port \fIport\fP as input instead of the standard input
+.TP 
 \fB\-o\fR <\fIfilename\fP>
 use \fIfilename\fP as output instead of the standard output (needs to be
 given for multi volume support)
+.TP 
+\fB\-O\fR <\fIhostname:port\fP>
+write output to \fIhostname:port\fP instead of the standard output
 .TP 
 \fB\-b\fR <\fInum\fP>
 use \fInum\fP blocks for buffer (default 256)
@@ -74,13 +80,19 @@ Using mbuffer to do a backup with tar to the default tape device. Options for th
 .LP 
 tar cf \- mydirectory | gzip | mbuffer \-t \-m 10M \-p 80 > $TAPE
 .LP
-Using mbuffer with 3 tapes for input and extracting the contents in the current work directory (EXPERIMENTAL):
+Using mbuffer with 3 tapes for input and extracting the contents in the current work directory:
 .LP
 mbuffer -n 3 -i $TAPE | gzip -dc | tar xf -
 .LP
 Using mbuffer to write to multiple tape volumes:
 .LP
 tar cf - /usr | mbuffer -o $TAPE
+.LP
+Making a backup via network (EXPERIMENTAL):
+.LP
+\fItape server: \fPmbuffer -I 8000 -o $TAPE
+.LP
+\fIbackup client: \fPtar zcf - /home | mbuffer -O tapeserver:8000
 .SH "AUTHORS"
 .LP 
 Thomas Maier\-Komor <software@maier\-komor.de>

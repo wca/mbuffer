@@ -1,3 +1,10 @@
+20010624:
+- added experimental networking code
+- bugfix for multivolume-code which might have caused
+  problems on devices which have a size which is
+  no multiple of Blocksize
+- docu update
+
 20010622:
 - architecture switches for x86 changed to match gcc-3.0
 - 64 Bit updates for huge data amounts

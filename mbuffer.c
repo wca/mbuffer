@@ -14,6 +14,15 @@
 #include <termios.h>
 #include <unistd.h>
 
+#ifdef EXPERIMENTAL
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+int Sock = 0;
+#endif
 
 pthread_t Reader, Writer;
 int Verbose = 3, Finish = 0, In, Out, Tmp, Rest = 0, Pause = 0, 
@@ -103,6 +112,10 @@ void terminate()
 	pthread_join(Writer,0);
 	if (Memmap)
 		munmap(Buffer[0],Blocksize*Numblocks);
+#ifdef EXPERIMENTAL
+	if (Sock)
+		close(Sock);
+#endif
 	close(Tmp);
 	remove(Tmpfile);
 	if (Status) {
@@ -212,8 +225,11 @@ void inputThread()
 			} else
 #endif
 			if (-1 == err) {
-				errormsg("\ninputThread: error reading: %s\n",strerror(errno));
+				errormsg("inputThread: error reading: %s\n",strerror(errno));
+				sem_post(&Buf2Dev);
+				sem_post(&Percentage);
 				Finish = 1;
+				infomsg("inputThread: exiting...\n");
 				pthread_exit((void *) 0);
 			} else if (0 == err) {
 				Finish = 1;
@@ -294,7 +310,8 @@ void outputThread()
 		rest = Blocksize;
 		do {
 			debugmsg("outputThread: write %i\n",-num);
-			err = write(Out,Buffer[at] + num, Outsize > rest ? Outsize : rest );
+			/* use Outsize which is the blocksize of the device */
+			err = write(Out,Buffer[at] + num, rest > Outsize ? Outsize : rest );
 #ifdef MULTIVOLUME
 			if ((-1 == err) && (Terminal) && ((errno == ENOMEM) || (errno == ENOSPC))) {
 				requestOutputVolume();
@@ -327,6 +344,73 @@ void outputThread()
 	}
 }
 
+#ifdef EXPERIMENTAL
+
+void openNetworkInput(unsigned short port)
+{
+	struct sockaddr_in saddr, caddr;
+	socklen_t clen;
+
+	infomsg("creating socket for network input...\n");
+	Sock = socket(AF_INET, SOCK_STREAM, 6);
+	if (0 > Sock)
+		fatal("could not crate socket for network input: %s\n",strerror(errno));
+	bzero(&saddr, sizeof(saddr));
+	saddr.sin_family = AF_INET;
+	saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	saddr.sin_port = htons(port);
+	infomsg("binding socket...\n");
+	if (0 > bind(Sock, (struct sockaddr *) &saddr, sizeof(saddr)))
+		fatal("could not bind to socket for network input: %s\n",strerror(errno));
+	infomsg("listening on socket...\n");
+	if (0 > listen(Sock,1))		/* accept only 1 incoming connection */
+		fatal("could not listen on socket for network input: %s\n",strerror(errno));
+	infomsg("waiting to accept connection...\n");
+	In = accept(Sock, (struct sockaddr *) &caddr, &clen);
+	if (0 > In)
+		fatal("could not accept connection for network input: %s\n",strerror(errno));
+}
+
+void openNetworkOutput(const char *host, unsigned short port)
+{
+	struct sockaddr_in saddr;
+
+	infomsg("creating socket for network output...\n");
+	Out = socket(AF_INET, SOCK_STREAM, 6);
+	if (0 > Out)
+		fatal("could not crate socket for network output: %s\n",strerror(errno));
+	bzero(&saddr, sizeof(saddr));
+	saddr.sin_family = AF_INET;
+	saddr.sin_port = htons(port);
+	infomsg("resolving server host...\n");
+	if (0 > inet_pton(AF_INET, host, &saddr.sin_addr))
+		fatal("could not resolve server hostname: %s\n",strerror(errno));
+	infomsg("connecting to server (%x)...\n",saddr.sin_addr);
+	if (0 > connect(Out, (struct sockaddr *) &saddr, sizeof(saddr)))
+		fatal("could not connect to server: %s\n",strerror(errno));
+}
+
+void getNetVars(const char **argv, int *c, const char **server, unsigned short *port)
+{
+	char *tmpserv;
+	
+	tmpserv = malloc(strlen(argv[*c] + 1));
+	if (0 == tmpserv)
+		fatal("out of memory in getNetVars(...)\n");
+	if (1 < sscanf(argv[*c],"%[0-9a-zA-Z.]:%hu",tmpserv,port)) {
+		*server = tmpserv;
+		return;
+	}
+	free((void *) tmpserv);
+	*server = argv[*c];
+	(*c)++;
+	*port = atoi(argv[*c]);
+	if (*port)
+		(*c)++;
+}
+
+#endif
+
 void version()
 {
 	fprintf(stderr,
@@ -349,6 +433,9 @@ void usage()
 #endif
 		"-p <num>   : start writing after buffer has been filled <num>%%\n"
 		"-i <file>  : use <file> for input\n"
+#ifdef EXPERIMENTAL
+		"-I <port>  : use network port <port> as input\n"
+#endif
 		"-o <file>  : use <file> for output\n"
 #ifdef MULTIVOLUME
 		"-n <num>   : <num> volumes for input\n"
@@ -365,7 +452,7 @@ void usage()
 	exit(0);
 }
 
-unsigned long long calcint(char **argv, int c, unsigned long long d)
+unsigned long long calcint(const char **argv, int c, unsigned long long d)
 {
 	char ch;
 	unsigned long long i;
@@ -392,7 +479,7 @@ unsigned long long calcint(char **argv, int c, unsigned long long d)
 	return d;
 }
 
-int argcheck(const char *opt, char **argv, int *c)
+int argcheck(const char *opt, const char **argv, int *c)
 {
 	if (strncmp(opt,argv[*c],2))
 		return 1;
@@ -403,12 +490,17 @@ int argcheck(const char *opt, char **argv, int *c)
 	return 0;
 }
 
-int main(int argc, char **argv)
+int main(int argc, const char **argv)
 {
 	unsigned long long totalmem = 0;
 	int c, optMset = 0, optSset = 0, optBset = 0;
 #ifdef HAVE_ST_BLKSIZE
 	struct stat st;
+#endif
+#ifdef EXPERIMENTAL
+	unsigned short netPortIn = 0;
+	const char *server = 0;
+	unsigned short netPortOut = 0;
 #endif
 	
 	Log = stderr;
@@ -441,11 +533,24 @@ int main(int argc, char **argv)
 		} else if (!argcheck("-i",argv,&c)) {
 			Infile = argv[c];
 			debugmsg("Infile set to %s\n",Infile);
+#ifdef EXPERIMENTAL
+		} else if (!argcheck("-I",argv,&c)) {
+			netPortIn = (atoi(argv[c])) ? (atoi(argv[c])): 0;
+			debugmsg("Network input set to port %hu\n",netPortIn);
+#endif
 		} else if (!argcheck("-o",argv,&c)) {
 			Outfile = argv[c];
 			debugmsg("Outfile set to %s\n",Outfile);
+#ifdef EXPERIMENTAL
+		} else if (!argcheck("-O",argv,&c)) {
+			getNetVars(argv,&c,&server,&netPortOut);
+			debugmsg("Output: server = %s, port = %hu\n",server,netPortOut);
+#endif
 		} else if (!argcheck("-T",argv,&c)) {
-			Tmpfile = argv[c];
+			Tmpfile = malloc(strlen(argv[c]) + 1);
+			if (!Tmpfile)
+				fatal("out of memory");
+			strcpy(Tmpfile, argv[c]);
 			Memmap = 1;
 			debugmsg("Tmpfile set to %s\n",Tmpfile);
 		} else if (!argcheck("-l",argv,&c)) {
@@ -495,6 +600,13 @@ int main(int argc, char **argv)
 		Blocksize = totalmem / Numblocks;
 		infomsg("blocksize set to %Lu\n",Blocksize);
 	}
+#ifdef EXPERIMENTAL
+	if (Infile && netPortIn)
+		fatal("Setting both network input port and input file doesn't make sense!");
+	if ((netPortOut == 0) ^ (server == 0))
+		fatal("When sending data to a server, both servername and port must be set!\n");
+#endif
+
 #ifdef MULTIVOLUME
 	/* multi volume input consistency checking */
 	if ((Multivolume) && (!Infile))
@@ -550,11 +662,19 @@ int main(int argc, char **argv)
 	if (Infile) {
 		if (-1 == (In = open(Infile,O_RDONLY)))
 			fatal("could not open input file: %s\n",strerror(errno));
+#ifdef EXPERIMENTAL
+	} else if (netPortIn) {
+		openNetworkInput(netPortIn);
+#endif
 	} else
 		In = fileno(stdin);
 	if (Outfile) {
 		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|O_SYNC,0666)))
 			fatal("could not open output file: %s\n",strerror(errno));
+#ifdef EXPERIMENTAL
+	} else if (netPortOut) {
+		openNetworkOutput(server,netPortOut);
+#endif
 	} else
 		Out = fileno(stdout);
 
@@ -566,10 +686,9 @@ int main(int argc, char **argv)
 		infomsg("blocksize on output device is %i\n",st.st_blksize);
 		if (Blocksize%st.st_blksize != 0)
 			warningmsg("Blocksize should be a multiple of the blocksize of the output device (is %i)!\n",st.st_blksize);
-		if (Blocksize != st.st_blksize) {
+		if (Blocksize != st.st_blksize)
 			infomsg("setting output blocksize to %i\n",st.st_blksize);
-			Outsize = st.st_blksize;
-		}
+		Outsize = st.st_blksize;
 	} else
 		infomsg("no device on output stream\n");
 #endif

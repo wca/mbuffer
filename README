@@ -42,11 +42,15 @@ it run ./configure --enable-experimental. The code should enable
 multi-volume usage on the output stream. Please test it and
 send comments and bug reports if you are interested that such
 a thing should be included.
-(currently no experimental code is included - 
- coming soon: networking code)
 
-In this version there is no experimental code. Soon networking
-stuff will be added here...
+
+NETWORKING (EXPERIMENTAL):
+==========================
+The included networking code is based on TCP and should
+therefore be fairly stable out of the box. To use it
+you should know the basics of TCP/IP. Use only
+on a trusted LAN, as there is no builtin security
+up to now.
 
 
 TESTING:
