@@ -1,3 +1,8 @@
+20011008:
+- more detailed errormsg for host name resolving
+- beautified some messages
+- compile/linker fix
+
 20010807:
 - update for networking code: added client host checking
 - message update

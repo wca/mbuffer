@@ -1,6 +1,6 @@
 AC_INIT(mbuffer.c)
 PACKAGE=mbuffer
-VERSION=20010807
+VERSION=20011008
 AC_CANONICAL_SYSTEM
 AM_INIT_AUTOMAKE(${PACKAGE},${VERSION})
 AM_CONFIG_HEADER(config.h)
@@ -12,6 +12,7 @@ AM_MISSING_PROG(AUTOCONF, autoconf, $missing_dir)
 AM_MISSING_PROG(AUTOMAKE, automake, $missing_dir)
 AM_MISSING_PROG(AUTOHEADER, autoheader, $missing_dir)
 AM_MISSING_PROG(MAKEINFO, makeinfo, $missing_dir)
+#AM_MISSING_PROG(LIBTOOL, libtool, $missing_dir)
 
 ALL_LINGUAS="de"
 AC_PREFIX_DEFAULT(/usr/local)
@@ -25,6 +26,8 @@ AC_PROG_INSTALL
 
 AC_PATH_PROG(RM,rm)
 AC_PATH_PROG(STRIP,strip)
+AC_PATH_PROG(LN,ln)
+#AC_PATH_PROG(LIBTOOL,libtool)
 AM_GNU_GETTEXT
 
 AC_CHECK_LIB(pthread,pthread_attr_init,,AC_MSG_ERROR(you need the pthread library!))
@@ -73,12 +76,14 @@ AC_ARG_ENABLE(multi-volume,
 	,AC_DEFINE_UNQUOTED(MULTIVOLUME))
 
 AC_ARG_ENABLE(networking,
-        --enable-networking     enable networking code (BETA)XS,
+        --enable-networking       enable networking code,
         AC_DEFINE_UNQUOTED(NETWORKING)
 	AC_SEARCH_LIBS(socket,socket,,
 		AC_MSG_ERROR(could not find the library containing network functions!))
 	AC_SEARCH_LIBS(gethostbyname,nsl,,
 		AC_MSG_ERROR(could not find the library containing name convertion functions!))
+	AC_SEARCH_LIBS(hstrerror,resolv,,
+		AC_MSG_ERROR(could not find the library containing hstrerror))
 	,)
 
 AC_SUBST(DEBUG)

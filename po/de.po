@@ -6,7 +6,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
-"POT-Creation-Date: 2001-08-07 15:20+0200\n"
+"POT-Creation-Date: 2001-10-06 17:29+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -48,7 +48,6 @@ msgid "\rcatched TERM signal...\n"
 msgstr "\rTERM Signal gefangen\n"
 
 #: mbuffer.c:176
-#, c-format
 msgid "\r%8.1f kB/s in - %8.1f kB/s out - %Lu kB total - buffer %3.0f%% full"
 msgstr ""
 "\r%8.1f kB/s rein - %8.1f kB/s raus - %Lu kB gesamt - Puffer %3.0f%% voll"
@@ -82,7 +81,9 @@ msgstr "warte bis das Gerät bereit ist...\n"
 msgid ""
 "\n"
 "insert next volume and press return to continue..."
-msgstr "\nBitte nächstes Medium einlegen und RETURN drücken..."
+msgstr ""
+"\n"
+"Bitte nächstes Medium einlegen und RETURN drücken..."
 
 #: mbuffer.c:223
 #, c-format
@@ -93,7 +94,9 @@ msgstr "Konnte Eingabe nicht wieder öffnen: %s\n"
 msgid ""
 "\n"
 "OK - continuing..."
-msgstr "\nOK - weiter gehts..."
+msgstr ""
+"\n"
+"OK - weiter gehts..."
 
 #: mbuffer.c:235
 msgid "inputThread: starting...\n"
@@ -117,7 +120,9 @@ msgstr "inputThread: letzter Block hat %i Bytes\n"
 msgid ""
 "\n"
 "inputThread: percentage reached - restarting output...\n"
-msgstr "\ninputThread: Prozentsatz erreicht - fahre fort mit Ausgabe...\n"
+msgstr ""
+"\n"
+"inputThread: Prozentsatz erreicht - fahre fort mit Ausgabe...\n"
 
 #: mbuffer.c:286
 msgid "inputThread: exiting..."
@@ -127,7 +132,8 @@ msgstr "inputThread: beende..."
 msgid ""
 "End of volume, but not end of input:\n"
 "Output file must be given (option -o) for multi volume support!\n"
-msgstr "Ende des Mediums - aber nicht der Eingabe:\n"
+msgstr ""
+"Ende des Mediums - aber nicht der Eingabe:\n"
 "Ausgabedatei muß angegeben werden (Option -o) für Multimedien unterstützung!\n"
 
 #: mbuffer.c:300
@@ -139,13 +145,17 @@ msgstr "verlange Medienwechsel...\n"
 msgid ""
 "\n"
 "volume full - insert new media and press return whe ready...\n"
-msgstr "\nMedium voll - bitte neues Medium einlegen und RETURN drücken...\n"
+msgstr ""
+"\n"
+"Medium voll - bitte neues Medium einlegen und RETURN drücken...\n"
 
 #: mbuffer.c:317
 msgid ""
 "\n"
 "OK - continuing...\n"
-msgstr "\nOK - fahre fort...\n"
+msgstr ""
+"\n"
+"OK - fahre fort...\n"
 
 #: mbuffer.c:320
 #, c-format
@@ -168,7 +178,9 @@ msgstr "Setze outputsize neu (ende des Mediums)\n"
 msgid ""
 "\n"
 "outputThread: starting...\n"
-msgstr "\noutputThread: starte...\n"
+msgstr ""
+"\n"
+"outputThread: starte...\n"
 
 #: mbuffer.c:359
 #, c-format
@@ -202,8 +214,9 @@ msgstr "Konnte socket für Netzwerkeingabe nicht erzeugen: %s\n"
 msgid "resolving hostname of input interface...\n"
 msgstr "Löse Hostnamen der Eingabeschnittstelle auf...\n"
 
-#: mbuffer.c:431
-msgid "could not resolve server hostname!\n"
+#: mbuffer.c:431 mbuffer.c:473
+#, fuzzy, c-format
+msgid "could not resolve server hostname: %s\n"
 msgstr "Konnte Hostnamen nicht auflösen!\n"
 
 #: mbuffer.c:438
@@ -252,10 +265,6 @@ msgstr "Konnte socket für Netzwerkausgabe nicht erzeugen: %s\n"
 msgid "resolving server host...\n"
 msgstr "Löse Servernamen auf...\n"
 
-#: mbuffer.c:473
-msgid "could not resolve server hostname!\n"
-msgstr "Konnte Hostname des Servers nicht auflösen!\n"
-
 #: mbuffer.c:476
 #, c-format
 msgid "connecting to server (%x)...\n"
@@ -266,12 +275,13 @@ msgstr "baue Verbindung zu (%x) auf...\n"
 msgid "could not connect to server: %s\n"
 msgstr "Konnte keine Verbindung zum Server herstellen: %s\n"
 
-#: mbuffer.c:487
-msgid "out of memory in getNetVars(...)\n"
-msgstr "Kein Hauptspeicher mehr in getNetVars(...)\n"
+#: mbuffer.c:487 mbuffer.c:655 mbuffer.c:744
+#, fuzzy
+msgid "out of memory\n"
+msgstr "Kein Hauptspeicher allozierbar\n"
 
 #: mbuffer.c:514
-#, c-format
+#, fuzzy
 msgid ""
 "mbuffer [Options]\n"
 "\n"
@@ -290,7 +300,7 @@ msgid ""
 "-T <file>  : as -t but uses <file> as buffer\n"
 "-l <file>  : use <file> for logging messages\n"
 "-u <num>   : pause <num> milliseconds after each write\n"
-"-f         : overwrite existing file\n"
+"-f         : overwrite existing files\n"
 "-a <time>  : autoloader which needs <time> seconds to reload\n"
 "-v <level> : set verbose level to <level> (valid values are 0..5)\n"
 "-q         : quiet - do not display the status on stderr\n"
@@ -323,227 +333,240 @@ msgstr ""
 "\n"
 "Nicht unterstützte Optionen von buffer: -t -Z -B\n"
 
-#: mbuffer.c:565
+#: mbuffer.c:557
 #, c-format
 msgid "unrecognized size charakter '%c' in option\n"
 msgstr "Ungülitges Zeichen für die Größenordnung: '%c'\n"
 
-#: mbuffer.c:571
+#: mbuffer.c:563
 #, c-format
 msgid "unrecognized argument \"%s\" for option \"%s\"\n"
 msgstr "Unbekanntes Argument \"%s\" für Option \"%s\"\n"
 
-#: mbuffer.c:621
+#: mbuffer.c:613
 msgid "setting output size according to the blocksize of the device\n"
 msgstr "Setze Ausgabegröße abhängig vom Ausgabegerät\n"
 
-#: mbuffer.c:633
+#: mbuffer.c:615
+msgid "cannot determine blocksize of device (unsupported by OS)\n"
+msgstr "Konnte Blockgröße des Gerätes nicht herausfinden.\n"
+"(nicht unterstützt vom Betriebssystem)\n"
+
+#: mbuffer.c:627
 msgid "argument for number of volumes must be > 0\n"
 msgstr "Argument für die Anzahl der Medien muß > 0 sein\n"
 
-#: mbuffer.c:642
+#: mbuffer.c:630
+#, fuzzy
+msgid "multi volume support has not been compiled in"
+msgstr "Multi Medien Unterstützung abgeschaltet"
+
+#: mbuffer.c:641
 #, c-format
 msgid "Network input set to %s:%hu\n"
 msgstr "Netzwerk Eingabe auf %s:%hu gesetzt\n"
 
-#: mbuffer.c:655
-msgid "out of memory"
-msgstr "Kein Hauptspeicher allozierbar"
+#: mbuffer.c:647 mbuffer.c:649
+msgid "support for network i/o has not been compiled in\n"
+msgstr ""
 
-#: mbuffer.c:663
+#: mbuffer.c:660 mbuffer.c:674
+msgid "support for temporary files has not been compiled in\n"
+msgstr ""
+
+#: mbuffer.c:666
 #, c-format
 msgid "error opening log file: %s\n"
 msgstr "Fehler beim öffnen der Logbuchdatei: %s\n"
 
-#: mbuffer.c:665
+#: mbuffer.c:668
 #, c-format
 msgid "logFile set to %s\n"
 msgstr "logFile gesetzt auf %s\n"
 
-#: mbuffer.c:675
+#: mbuffer.c:680
 msgid "disabling display of status\n"
 msgstr "Status informationen ausgeschaltet\n"
 
-#: mbuffer.c:692
+#: mbuffer.c:697
 #, c-format
 msgid "unknown option \"%s\"\n"
 msgstr "Unbekannte Option \"%s\"\n"
 
-#: mbuffer.c:698
+#: mbuffer.c:703
 msgid "inconsistent options: blocksize * number of blocks != totalsize!\n"
 msgstr "Inkonsistente Optionen: Blockgröße * Anzahl(Blöcke) != Gesamtgröße!\n"
 
-#: mbuffer.c:701
+#: mbuffer.c:706
 #, c-format
 msgid ""
 "maximum number of managable blocks is %Li\n"
 "Try a bigger blocksize!\n"
-msgstr "Maximale Anzahl der verwaltbaren Blöcke ist %Li\n"
+msgstr ""
+"Maximale Anzahl der verwaltbaren Blöcke ist %Li\n"
 "Versuchs mit einer größere Blockgröße!\n"
 
-#: mbuffer.c:711
+#: mbuffer.c:716
 msgid ""
 "Setting autoloader time without using a device doesn't make any sense!\n"
 msgstr "Eine Autowechselzeit zu setzen ohne ein Gerät anzugeben macht keinen Sinn!\n"
 
-#: mbuffer.c:714
+#: mbuffer.c:719
 msgid "Setting both network input port and input file doesn't make sense!\n"
 msgstr "Netzwerkeingabe und eine Eingabedatei zu setzen macht keinen Sinn!\n"
 
-#: mbuffer.c:716
+#: mbuffer.c:721
 msgid "Setting both network output and output file doesn't make sense!\n"
 msgstr "Netzwerkausgabe und Ausgabedatei anzugeben macht keinen Sinn!\n"
 
-#: mbuffer.c:718
+#: mbuffer.c:723
 msgid "You need to set a network port for network input!\n"
 msgstr "Du mußt einen Netzwerk port angeben für Netzwerk Eingabe!\n"
 
-#: mbuffer.c:720
+#: mbuffer.c:725
 msgid "When sending data to a server, both servername and port must be set!\n"
 msgstr "Für die Netzwerkausgabe müssen Host und Port gesetzt sein!\n"
 
-#: mbuffer.c:726
+#: mbuffer.c:731
 msgid ""
 "multi volume support for input needs an explicit given input device (option -"
 "i)\n"
 msgstr "Multi Medien Unterstützung benötigt die explizite Angabe eines Geräts (Option -i)\n"
 
-#: mbuffer.c:732
+#: mbuffer.c:737
 msgid "Could not allocate enough memory!\n"
 msgstr "Nicht genügend Hauptspeicher allozierbar!\n"
 
-#: mbuffer.c:735
+#: mbuffer.c:740
 #, c-format
 msgid ""
 "mapping temporary file to memory with %i blocks with %Lu byte (%Lu kB "
 "total)...\n"
 msgstr "blende temporäre Datei mit %i Blöcken und %Lu Bytes in den Hauptspeicher (gesamt %Lu kB)\n"
 
-#: mbuffer.c:739
-msgid "out of memory.\n"
-msgstr "Kein Hauptspeicher allozierbar\n"
-
-#: mbuffer.c:746
+#: mbuffer.c:751
 #, c-format
 msgid "could not create temporary file (%s): %s\n"
 msgstr "konnte temporäre Datei (%s) nicht anlegen: %s\n"
 
-#: mbuffer.c:749 mbuffer.c:751
+#: mbuffer.c:754 mbuffer.c:756
 #, c-format
 msgid "could not resize temporary file: %s\n"
 msgstr "Konnte Größe der temporären Datei nicht ändern: %s\n"
 
-#: mbuffer.c:754
+#: mbuffer.c:759
 #, c-format
 msgid "could not map buffer-file to memory: %s\n"
 msgstr "Konnte Pufferdatei nicht in den Hauptspeicher einblenden: %s\n"
 
-#: mbuffer.c:755
+#: mbuffer.c:760
 #, c-format
 msgid "temporary file mapped to address %p\n"
 msgstr "temporäre Datei auf Adresse %p eingeblendet\n"
 
-#: mbuffer.c:758
+#: mbuffer.c:763
 #, c-format
 msgid "allocating memory for %i blocks with %Lu byte (%Lu kB total)...\n"
 msgstr "alloziere Hauptspeicher für %i Blöcke mit %Lu Bytes (%Lu kB gesamt)...\n"
 
-#: mbuffer.c:766
+#: mbuffer.c:771
 msgid "creating semaphores...\n"
 msgstr "erzeuge Semaphoren...\n"
 
-#: mbuffer.c:768
+#: mbuffer.c:773
 #, c-format
 msgid "Error creating semaphore Buf2Dev: %s\n"
 msgstr "Fehler beim Erzeugen der Semaphore Buf2Dev: %s\n"
 
-#: mbuffer.c:770
+#: mbuffer.c:775
 #, c-format
 msgid "Error creating semaphore Dev2Buf: %s\n"
 msgstr "Fehler beim Erzeugen der Semaphore Dev2Buf: %s\n"
 
-#: mbuffer.c:772
+#: mbuffer.c:777
 #, c-format
 msgid "Error creating semaphore Percentage: %s\n"
 msgstr "Fehler beim Erzeugen der Semaphore Percentage: %s\n"
 
-#: mbuffer.c:774
+#: mbuffer.c:779
 msgid "opening streams...\n"
 msgstr "Öffne Verbindungen...\n"
 
-#: mbuffer.c:777
+#: mbuffer.c:782
 #, c-format
 msgid "could not open input file: %s\n"
 msgstr "Konnte Eingabedatei nicht öffnen: %s\n"
 
-#: mbuffer.c:786
+#: mbuffer.c:791
 #, c-format
 msgid "could not open output file: %s\n"
 msgstr "Konnte Ausgabedatei nicht öffnen: %s\n"
 
-#: mbuffer.c:795
+#: mbuffer.c:800
 msgid "checking output device...\n"
 msgstr "Prüfe Ausgabegerät...\n"
 
-#: mbuffer.c:797
+#: mbuffer.c:802
 #, c-format
 msgid "could not stat output: %s\n"
 msgstr "Prüfung des Ausgabegeräts fehlgeschlagen: %s\n"
 
-#: mbuffer.c:799
+#: mbuffer.c:804
 #, c-format
 msgid "blocksize is %i bytes on output device\n"
 msgstr "Blockgröße ist %i Bytes auf dem Ausgabegerät\n"
 
-#: mbuffer.c:801
+#: mbuffer.c:806
 #, c-format
 msgid ""
 "Blocksize should be a multiple of the blocksize of the output device (is %"
 "i)!\n"
 "This can cause problems with some device/OS combinations...\n"
-msgstr "Die Blockgröße sollte ein vielfaches der des Ausgabegerätes sein (ist %i)!\n"
+msgstr ""
+"Die Blockgröße sollte ein vielfaches der des Ausgabegerätes sein (ist %i)!\n"
 "Dies kann zu Problemen mit einigen Geräte/Betriebssystem Kombinationen führen...\n"
 
-#: mbuffer.c:805
+#: mbuffer.c:810
 #, c-format
 msgid "setting output blocksize to %i\n"
 msgstr "Setze Ausgabeblockgröße auf %i\n"
 
-#: mbuffer.c:809
+#: mbuffer.c:814
 msgid "no device on output stream\n"
 msgstr "Kein Gerät an der Ausgabe\n"
 
-#: mbuffer.c:811
+#: mbuffer.c:816
 msgid ""
 "Could not stat output device (unsupported by system)!\n"
 "This can result in incorrect written data when\n"
 "using multiple volumes. Continue at your own risc!\n"
-msgstr "Konnte Ausgabegerät nicht analysieren (vom System aus nicht möglich)!"
-"Dies kann zu fehlerhaft geschriebenen Daten führen wenn mehrere\n"
+msgstr ""
+"Konnte Ausgabegerät nicht analysieren (vom System aus nicht möglich)!Dies kann zu fehlerhaft geschriebenen Daten führen wenn mehrere\n"
 "Medien genutzt werden. Fortfahren auf eigene Gefahr!\n"
 
-#: mbuffer.c:816
+#: mbuffer.c:821
 msgid "accessing terminal...\n"
 msgstr "Öffne Terminal...\n"
 
-#: mbuffer.c:819
+#: mbuffer.c:824
 #, c-format
 msgid "could not open terminal: %s\n"
 msgstr "Konnte Terminal nicht öffnen: %s\n"
 
-#: mbuffer.c:820
+#: mbuffer.c:825
 msgid "multi volume support turned off"
 msgstr "Multi Medien Unterstützung abgeschaltet"
 
-#: mbuffer.c:824
+#: mbuffer.c:829
 msgid "registering signals...\n"
 msgstr "registriere Signale...\n"
 
-#: mbuffer.c:826 mbuffer.c:828
+#: mbuffer.c:831 mbuffer.c:833
 #, c-format
 msgid "error registering new SIGINT handler: %s\n"
 msgstr "Fehler beim registrieren des Handlers für SIGINT: %s\n"
 
-#: mbuffer.c:830
+#: mbuffer.c:835
 msgid "starting threads...\n"
 msgstr "starte Threads...\n"
+

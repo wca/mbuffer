@@ -428,7 +428,7 @@ void openNetworkInput(const char *host, unsigned short port)
 	if (host) {
 		debugmsg(gettext("resolving hostname of input interface...\n"));
 		if (0 == (h = gethostbyname(host)))
-			fatal(gettext("could not resolve server hostname!\n"));	/* here should be a h_errno printout */
+			fatal(gettext("could not resolve server hostname: %s\n"),hstrerror(h_errno));
 	}
 	saddr.sin_family = AF_INET;
 	saddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -470,7 +470,7 @@ void openNetworkOutput(const char *host, unsigned short port)
 	saddr.sin_port = htons(port);
 	infomsg(gettext("resolving server host...\n"));
 	if (0 == (h = gethostbyname(host)))
-		fatal(gettext("could not resolve server hostname!\n"));	/* here should be a h_errno printout */
+		fatal(gettext("could not resolve server hostname: %s\n"),hstrerror(h_errno));
 	saddr.sin_family = h->h_addrtype;
 	memcpy(&saddr.sin_addr,h->h_addr_list[0],h->h_length);
 	infomsg(gettext("connecting to server (%x)...\n"),saddr.sin_addr);
@@ -484,7 +484,7 @@ void getNetVars(const char **argv, int *c, const char **server, unsigned short *
 	
 	tmpserv = malloc(strlen(argv[*c] + 1));
 	if (0 == tmpserv)
-		fatal(gettext("out of memory in getNetVars(...)\n"));
+		fatal(gettext("out of memory\n"));
 	if (1 < sscanf(argv[*c],"%[0-9a-zA-Z.]:%hu",tmpserv,port)) {
 		*server = tmpserv;
 		return;
@@ -516,22 +516,14 @@ void usage()
 		"-b <num>   : use <num> blocks for buffer (default %i)\n"
 		"-s <size>  : use block of <size> bytes for buffer (default %Lu)\n"
 		"-m <size>  : use buffer of a total of <size> bytes\n"
-#ifdef HAVE_MMAP
 		"-t         : use memory mapped temporary file (for huge buffer)\n"
-#endif
-#ifdef HAVE_ST_BLKSIZE
 		"-d         : use blocksize of device for output\n"
-#endif
 		"-p <num>   : start writing after buffer has been filled <num>%%\n"
 		"-i <file>  : use <file> for input\n"
 		"-o <file>  : use <file> for output\n"
-#ifdef NETWORKING
 		"-I <h>:<p> : use network port <port> as input\n"
 		"-O <h>:<p> : output data to host <h> and port <p>\n"
-#endif
-#ifdef MULTIVOLUME
 		"-n <num>   : <num> volumes for input\n"
-#endif
 		"-T <file>  : as -t but uses <file> as buffer\n"
 		"-l <file>  : use <file> for logging messages\n"
 		"-u <num>   : pause <num> milliseconds after each write\n"
@@ -615,10 +607,12 @@ int main(int argc, const char **argv)
 			Numblocks = (atoi(argv[c])) ? (atoi(argv[c])) : Numblocks;
 			optBset = 1;
 			debugmsg("Numblocks = %i\n",Numblocks);
-#ifdef HAVE_ST_BLKSIZE
+#ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 		} else if (!argcheck("-d",argv,&c)) {
 			setOutsize = 1;
 			debugmsg(gettext("setting output size according to the blocksize of the device\n"));
+#else
+			fatal(gettext("cannot determine blocksize of device (unsupported by OS)\n"));
 #endif
 		} else if (!argcheck("-v",argv,&c)) {
 			Verbose = (atoi(argv[c])) ? (atoi(argv[c])) : Verbose;
@@ -632,30 +626,39 @@ int main(int argc, const char **argv)
 			if (Multivolume <= 0)
 				fatal(gettext("argument for number of volumes must be > 0\n"));
 			debugmsg("Multivolume = %i\n",Multivolume);
+#else
+			fatal(gettext("multi volume support has not been compiled in"));
 #endif
 		} else if (!argcheck("-i",argv,&c)) {
 			Infile = argv[c];
 			debugmsg("Infile = %s\n",Infile);
-#ifdef NETWORKING
-		} else if (!argcheck("-I",argv,&c)) {
-			getNetVars(argv,&c,&client,&netPortIn);
-			debugmsg(gettext("Network input set to %s:%hu\n"),client,netPortIn);
-#endif
 		} else if (!argcheck("-o",argv,&c)) {
 			Outfile = argv[c];
 			debugmsg("Outfile = \"%s\"\n",Outfile);
 #ifdef NETWORKING
+		} else if (!argcheck("-I",argv,&c)) {
+			getNetVars(argv,&c,&client,&netPortIn);
+			debugmsg(gettext("Network input set to %s:%hu\n"),client,netPortIn);
 		} else if (!argcheck("-O",argv,&c)) {
 			getNetVars(argv,&c,&server,&netPortOut);
 			debugmsg("Output: server = %s, port = %hu\n",server,netPortOut);
+#else
+		} else if (!argcheck("-I",argv,&c)) {
+			fatal(gettext("support for network i/o has not been compiled in\n"));
+		} else if (!argcheck("-O",argv,&c)) {
+			fatal(gettext("support for network i/o has not been compiled in\n"));
 #endif
 		} else if (!argcheck("-T",argv,&c)) {
+#ifdef HAVE_MMAP
 			Tmpfile = malloc(strlen(argv[c]) + 1);
 			if (!Tmpfile)
-				fatal(gettext("out of memory"));
+				fatal(gettext("out of memory\n"));
 			strcpy(Tmpfile, argv[c]);
 			Memmap = 1;
 			debugmsg("Tmpfile = %s\n",Tmpfile);
+#else		
+			fatal(gettext("support for temporary files has not been compiled in\n"));
+#endif
 		} else if (!argcheck("-l",argv,&c)) {
 			Log = fopen(argv[c],"w");
 			if (0 == Log) {
@@ -663,10 +666,12 @@ int main(int argc, const char **argv)
 				errormsg(gettext("error opening log file: %s\n"),strerror(errno));
 			}
 			debugmsg(gettext("logFile set to %s\n"),argv[c]);
-#ifdef HAVE_MMAP
 		} else if (!strcmp("-t",argv[c])) {
+#ifdef HAVE_MMAP
 			Memmap = 1;
 			debugmsg("mm = 1\n");
+#else		
+			fatal(gettext("support for temporary files has not been compiled in\n"));
 #endif
 		} else if (!strcmp("-f",argv[c])) {
 			Nooverwrite = 0;
@@ -736,7 +741,7 @@ int main(int argc, const char **argv)
 		if (!Tmpfile) {
 			Tmpfile = malloc(20*sizeof(char));
 			if (!Tmpfile)
-				fatal(gettext("out of memory.\n"));
+				fatal(gettext("out of memory\n"));
 			strcpy(Tmpfile,"/tmp/mbuffer-XXXXXX");
 			Tmp = mkstemp(Tmpfile);
 		} else {

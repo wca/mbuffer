@@ -6,13 +6,13 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
-"POT-Creation-Date: 2001-08-07 15:20+0200\n"
+"POT-Creation-Date: 2001-10-06 17:29+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=CHARSET\n"
-"Content-Transfer-Encoding: 8bit\n"
+"Content-Transfer-Encoding: ENCODING\n"
 
 #: mbuffer.c:75
 msgid "warning: "
@@ -46,7 +46,6 @@ msgid "\rcatched TERM signal...\n"
 msgstr ""
 
 #: mbuffer.c:176
-#, c-format
 msgid "\r%8.1f kB/s in - %8.1f kB/s out - %Lu kB total - buffer %3.0f%% full"
 msgstr ""
 
@@ -96,15 +95,6 @@ msgstr ""
 msgid "inputThread: starting...\n"
 msgstr ""
 
-#: mbuffer.c:238
-msgid "inputThread: wait\n"
-msgstr ""
-
-#: mbuffer.c:243
-#, c-format
-msgid "inputThread: read(In, Buffer[%i] + %i, %Lu) = %i\n"
-msgstr ""
-
 #: mbuffer.c:250
 #, c-format
 msgid "inputThread: error reading: %s\n"
@@ -117,10 +107,6 @@ msgstr ""
 #: mbuffer.c:262
 #, c-format
 msgid "inputThread: last block has %i bytes\n"
-msgstr ""
-
-#: mbuffer.c:270
-msgid "inputThread: post\n"
 msgstr ""
 
 #: mbuffer.c:276
@@ -178,10 +164,6 @@ msgid ""
 "outputThread: starting...\n"
 msgstr ""
 
-#: mbuffer.c:353
-msgid "outputThread: wait\n"
-msgstr ""
-
 #: mbuffer.c:359
 #, c-format
 msgid "outputThread: inputThread finished, %i blocks remaining\n"
@@ -214,12 +196,9 @@ msgstr ""
 msgid "resolving hostname of input interface...\n"
 msgstr ""
 
-#: mbuffer.c:431
-msgid "could not resolve server hostname!\n"
-msgstr ""
-
-#: mbuffer.c:436
-msgid "binding socket...\n"
+#: mbuffer.c:431 mbuffer.c:473
+#, c-format
+msgid "could not resolve server hostname: %s\n"
 msgstr ""
 
 #: mbuffer.c:438
@@ -268,10 +247,6 @@ msgstr ""
 msgid "resolving server host...\n"
 msgstr ""
 
-#: mbuffer.c:473
-msgid "could not resolve server hostname!"
-msgstr ""
-
 #: mbuffer.c:476
 #, c-format
 msgid "connecting to server (%x)...\n"
@@ -282,12 +257,11 @@ msgstr ""
 msgid "could not connect to server: %s\n"
 msgstr ""
 
-#: mbuffer.c:487
-msgid "out of memory in getNetVars(...)\n"
+#: mbuffer.c:487 mbuffer.c:655 mbuffer.c:744
+msgid "out of memory\n"
 msgstr ""
 
 #: mbuffer.c:514
-#, c-format
 msgid ""
 "mbuffer [Options]\n"
 "\n"
@@ -300,12 +274,12 @@ msgid ""
 "-p <num>   : start writing after buffer has been filled <num>%%\n"
 "-i <file>  : use <file> for input\n"
 "-o <file>  : use <file> for output\n"
-"-I <port>  : use network port <port> as input\n"
-"-O <h:p>   : output data to host <h> and port <p>\n"
+"-I <h>:<p> : use network port <port> as input\n"
+"-O <h>:<p> : output data to host <h> and port <p>\n"
 "-n <num>   : <num> volumes for input\n"
 "-T <file>  : as -t but uses <file> as buffer\n"
 "-l <file>  : use <file> for logging messages\n"
-"-u <num>   : pause <num> microseconds after each write\n"
+"-u <num>   : pause <num> milliseconds after each write\n"
 "-f         : overwrite existing files\n"
 "-a <time>  : autoloader which needs <time> seconds to reload\n"
 "-v <level> : set verbose level to <level> (valid values are 0..5)\n"
@@ -315,183 +289,186 @@ msgid ""
 "Unsupported buffer options: -t -Z -B\n"
 msgstr ""
 
-#: mbuffer.c:565
+#: mbuffer.c:557
 #, c-format
 msgid "unrecognized size charakter '%c' in option\n"
 msgstr ""
 
-#: mbuffer.c:571
+#: mbuffer.c:563
 #, c-format
 msgid "unrecognized argument \"%s\" for option \"%s\"\n"
 msgstr ""
 
-#: mbuffer.c:621
+#: mbuffer.c:613
 msgid "setting output size according to the blocksize of the device\n"
 msgstr ""
 
-#: mbuffer.c:633
+#: mbuffer.c:615
+msgid "cannot determine blocksize of device (unsupported by OS)\n"
+msgstr ""
+
+#: mbuffer.c:627
 msgid "argument for number of volumes must be > 0\n"
 msgstr ""
 
-#: mbuffer.c:642
+#: mbuffer.c:630
+msgid "multi volume support has not been compiled in"
+msgstr ""
+
+#: mbuffer.c:641
 #, c-format
 msgid "Network input set to %s:%hu\n"
 msgstr ""
 
-#: mbuffer.c:655
-msgid "out of memory"
+#: mbuffer.c:647 mbuffer.c:649
+msgid "support for network i/o has not been compiled in\n"
 msgstr ""
 
-#: mbuffer.c:663
+#: mbuffer.c:660 mbuffer.c:674
+msgid "support for temporary files has not been compiled in\n"
+msgstr ""
+
+#: mbuffer.c:666
 #, c-format
 msgid "error opening log file: %s\n"
 msgstr ""
 
-#: mbuffer.c:665
+#: mbuffer.c:668
 #, c-format
 msgid "logFile set to %s\n"
 msgstr ""
 
-#: mbuffer.c:675
+#: mbuffer.c:680
 msgid "disabling display of status\n"
 msgstr ""
 
-#: mbuffer.c:679
-#, c-format
-msgid "Autoloader time set to %i\n"
-msgstr ""
-
-#: mbuffer.c:692
+#: mbuffer.c:697
 #, c-format
 msgid "unknown option \"%s\"\n"
 msgstr ""
 
-#: mbuffer.c:698
+#: mbuffer.c:703
 msgid "inconsistent options: blocksize * number of blocks != totalsize!\n"
 msgstr ""
 
-#: mbuffer.c:701
+#: mbuffer.c:706
 #, c-format
 msgid ""
 "maximum number of managable blocks is %Li\n"
 "Try a bigger blocksize!\n"
 msgstr ""
 
-#: mbuffer.c:711
+#: mbuffer.c:716
 msgid ""
 "Setting autoloader time without using a device doesn't make any sense!\n"
 msgstr ""
 
-#: mbuffer.c:714
+#: mbuffer.c:719
 msgid "Setting both network input port and input file doesn't make sense!\n"
 msgstr ""
 
-#: mbuffer.c:716
+#: mbuffer.c:721
 msgid "Setting both network output and output file doesn't make sense!\n"
 msgstr ""
 
-#: mbuffer.c:718
+#: mbuffer.c:723
 msgid "You need to set a network port for network input!\n"
 msgstr ""
 
-#: mbuffer.c:720
+#: mbuffer.c:725
 msgid "When sending data to a server, both servername and port must be set!\n"
 msgstr ""
 
-#: mbuffer.c:726
+#: mbuffer.c:731
 msgid ""
 "multi volume support for input needs an explicit given input device (option -"
 "i)\n"
 msgstr ""
 
-#: mbuffer.c:732
+#: mbuffer.c:737
 msgid "Could not allocate enough memory!\n"
 msgstr ""
 
-#: mbuffer.c:735
+#: mbuffer.c:740
 #, c-format
 msgid ""
 "mapping temporary file to memory with %i blocks with %Lu byte (%Lu kB "
 "total)...\n"
 msgstr ""
 
-#: mbuffer.c:739
-msgid "out of memory.\n"
-msgstr ""
-
-#: mbuffer.c:746
+#: mbuffer.c:751
 #, c-format
 msgid "could not create temporary file (%s): %s\n"
 msgstr ""
 
-#: mbuffer.c:749 mbuffer.c:751
+#: mbuffer.c:754 mbuffer.c:756
 #, c-format
 msgid "could not resize temporary file: %s\n"
 msgstr ""
 
-#: mbuffer.c:754
+#: mbuffer.c:759
 #, c-format
 msgid "could not map buffer-file to memory: %s\n"
 msgstr ""
 
-#: mbuffer.c:755
+#: mbuffer.c:760
 #, c-format
 msgid "temporary file mapped to address %p\n"
 msgstr ""
 
-#: mbuffer.c:758
+#: mbuffer.c:763
 #, c-format
 msgid "allocating memory for %i blocks with %Lu byte (%Lu kB total)...\n"
 msgstr ""
 
-#: mbuffer.c:766
+#: mbuffer.c:771
 msgid "creating semaphores...\n"
 msgstr ""
 
-#: mbuffer.c:768
+#: mbuffer.c:773
 #, c-format
 msgid "Error creating semaphore Buf2Dev: %s\n"
 msgstr ""
 
-#: mbuffer.c:770
+#: mbuffer.c:775
 #, c-format
 msgid "Error creating semaphore Dev2Buf: %s\n"
 msgstr ""
 
-#: mbuffer.c:772
+#: mbuffer.c:777
 #, c-format
 msgid "Error creating semaphore Percentage: %s\n"
 msgstr ""
 
-#: mbuffer.c:774
+#: mbuffer.c:779
 msgid "opening streams...\n"
 msgstr ""
 
-#: mbuffer.c:777
+#: mbuffer.c:782
 #, c-format
 msgid "could not open input file: %s\n"
 msgstr ""
 
-#: mbuffer.c:786
+#: mbuffer.c:791
 #, c-format
 msgid "could not open output file: %s\n"
 msgstr ""
 
-#: mbuffer.c:795
+#: mbuffer.c:800
 msgid "checking output device...\n"
 msgstr ""
 
-#: mbuffer.c:797
+#: mbuffer.c:802
 #, c-format
 msgid "could not stat output: %s\n"
 msgstr ""
 
-#: mbuffer.c:799
+#: mbuffer.c:804
 #, c-format
 msgid "blocksize is %i bytes on output device\n"
 msgstr ""
 
-#: mbuffer.c:801
+#: mbuffer.c:806
 #, c-format
 msgid ""
 "Blocksize should be a multiple of the blocksize of the output device (is %"
@@ -499,44 +476,44 @@ msgid ""
 "This can cause problems with some device/OS combinations...\n"
 msgstr ""
 
-#: mbuffer.c:805
+#: mbuffer.c:810
 #, c-format
 msgid "setting output blocksize to %i\n"
 msgstr ""
 
-#: mbuffer.c:809
+#: mbuffer.c:814
 msgid "no device on output stream\n"
 msgstr ""
 
-#: mbuffer.c:811
+#: mbuffer.c:816
 msgid ""
 "Could not stat output device (unsupported by system)!\n"
 "This can result in incorrect written data when\n"
 "using multiple volumes. Continue at your own risc!\n"
 msgstr ""
 
-#: mbuffer.c:816
+#: mbuffer.c:821
 msgid "accessing terminal...\n"
 msgstr ""
 
-#: mbuffer.c:819
+#: mbuffer.c:824
 #, c-format
 msgid "could not open terminal: %s\n"
 msgstr ""
 
-#: mbuffer.c:820
+#: mbuffer.c:825
 msgid "multi volume support turned off"
 msgstr ""
 
-#: mbuffer.c:824
+#: mbuffer.c:829
 msgid "registering signals...\n"
 msgstr ""
 
-#: mbuffer.c:826 mbuffer.c:828
+#: mbuffer.c:831 mbuffer.c:833
 #, c-format
 msgid "error registering new SIGINT handler: %s\n"
 msgstr ""
 
-#: mbuffer.c:830
+#: mbuffer.c:835
 msgid "starting threads...\n"
 msgstr ""
