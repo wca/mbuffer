@@ -1,4 +1,4 @@
-m(easuring)buffer version 20010208
+m(easuring)buffer version 20010430
 ==================================
 AUTHOR: Thomas Maier-Komor
 e-mail: software@maier-komor.de
@@ -19,12 +19,21 @@ mbuffer is a raplacement for buffer with additional functionality:
 # compatible command-line options
 # --? bugs to hunt ?-- :-((
 
+EXPERIMENTAL:
+=============
+This version of mbuffer includes new code which is experimental.
+By default this code is not compiled in. If you want to test
+it run ./configure --enable-experimental. The code should enable
+multi-volume usage on the output stream. Please test it and
+send comments and bug reports if you are interested that such
+a thing should be included.
+
 
 TESTING:
 ========
 to test the program I do the following:
 # tar cf - /usr | mbuffer | tar tf - > out
-# tar cf - /usr | mbuffer -h | tar tf - > out
+# tar cf - /usr | mbuffer -t | tar tf - > out
 
 
 ARCHITECTURES:

@@ -9,7 +9,7 @@ test "$exec_prefix" = NONE && exec_prefix=$prefix
 
 PACKAGE=mbuffer
 
-VERSION=20010208
+VERSION=20010507
 AC_DEFINE_UNQUOTED(VERSION,"${VERSION}")
 AC_SUBST(VERSION)
 
@@ -63,5 +63,12 @@ AC_ARG_ENABLE(debug,
         )
 AC_SUBST(DEBUG)
 AC_SUBST(NDEBUG)
+
+AC_ARG_ENABLE(experimental,
+        --enable-experimental     enable experimental code,
+        AC_DEFINE_UNQUOTED(EXPERIMENTAL),
+        )
+AC_SUBST(EXPERIMENTAL)
+
 
 AC_OUTPUT(Makefile)

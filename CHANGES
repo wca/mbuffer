@@ -1,3 +1,10 @@
+20010507:
+- status messages are now printed to the terminal not to stderr
+- Bugfix: for output blocksize code
+- documentation update
+- new: summary information
+- experimental feature: output to multiple volumes
+
 20010426:
 - Bugfix: fixed sleep, which limited the performace to 1MB/s
           (credits go to Padraig Brady <padraig@antefacto.com>)

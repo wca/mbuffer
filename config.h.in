@@ -42,3 +42,8 @@
 /* Needed for thread safe compilation */
 #undef _REENTRANT
 
+/* needed for determination of the blocksize of the output device */
+#undef HAVE_ST_BLKSIZE
+
+/* needed to include experimental code */
+#undef EXPERIMENTAL

@@ -28,3 +28,6 @@ distclean: clean
 
 install:
 	$(INSTALL) $(TARGET) $(bindir)
+
+# dependencies
+mbuffer.o : config.h mbuffer.c

@@ -10,6 +10,8 @@
 #include <string.h>
 #include <sys/timeb.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <termios.h>
 #include <unistd.h>
 
 
@@ -17,12 +19,10 @@ pthread_t Reader, Writer;
 int Verbose = 3, Finish = 0, In, Out, Tmp, Rest = 0, Numin = 0,
     Numout = 0, Pause = 0, Memmap = 0, Status = 1, Outsize = 0;
 float Start = 0;
-char *Tmpfile = 0;
-char **Buffer;
-int Blocksize = 10240;
-int Numblocks = 256;
+char *Tmpfile = 0, **Buffer;
+int Blocksize = 10240, Numblocks = 256;
 sem_t Dev2Buf,Buf2Dev;
-FILE* Log;
+FILE *Log = 0, *Terminal = 0;
 
 
 void debugmsg(const char *msg, ...)
@@ -47,6 +47,17 @@ void infomsg(const char *msg, ...)
 	va_end(val);
 }
 
+void warningmsg(const char *msg, ...)
+{
+	va_list val;
+	if (Verbose < 3)
+		return;
+	va_start(val,msg);
+	fprintf(Log,"warning: ");
+	vfprintf(Log,msg,val);
+	va_end(val);
+}
+
 void errormsg(const char *msg, ...)
 {
 	va_list val;
@@ -54,9 +65,9 @@ void errormsg(const char *msg, ...)
 	if (Verbose < 2)
 		return;
 	va_start(val,msg);
+	fprintf(Log,"error: ");
 	vfprintf(Log,msg,val);
 	va_end(val);
-	exit(-1);
 }
 
 
@@ -67,6 +78,7 @@ void fatal(const char *msg, ...)
 	if (Verbose < 1)
 		return;
 	va_start(val,msg);
+	fprintf(Log,"fatal: ");
 	vfprintf(Log,msg,val);
 	va_end(val);
 	exit(-1);
@@ -97,11 +109,13 @@ RETSIGTYPE sigHandler(int signr)
 
 void statusThread() 
 {
-	struct timeb last, now;
+	struct timeb start, last, now;
 	float in = 0, out = 0, diff, fill;
 	int total, rest, lin = 0, lout = 0;
 
-	ftime(&last);
+	ftime(&start);
+	last.time = start.time;
+	last.millitm = start.millitm;
 	usleep(1000);	// needed on alpha (stderr fails with fpe on nan)
 	sem_getvalue(&Buf2Dev,&rest);
 	while (!(Finish & (rest == 0))) {
@@ -117,8 +131,9 @@ void statusThread()
 		last.time = now.time;
 		last.millitm = now.millitm;
 		total = ((long long)Numout * Blocksize) >> 10;
-		fprintf(stderr,"\rin at %8.1f kB/sec - out at %8.1f kB/sec - %i kB totally transfered - buffer %3.0f%% full",in,out,total,fill);
-		fflush(Log);
+		fill = (fill < 0) ? 0 : fill;
+		fprintf(Terminal,"\rin at %8.1f kB/sec - out at %8.1f kB/sec - %i kB totally transfered - buffer %3.0f%% full",in,out,total,fill);
+		fflush(Terminal);
 		usleep(500000);
 		sem_getvalue(&Buf2Dev,&rest);
 	}
@@ -130,6 +145,11 @@ void statusThread()
 		munmap(Buffer[0],Blocksize*Numblocks);
 	close(Tmp);
 	remove(Tmpfile);
+	diff = now.time - start.time + (float) now.millitm / 1000 - (float) start.millitm / 1000;
+	out = (((float) Numout * Blocksize) / 1024) / diff;
+	fprintf(Terminal,"summary: %i kB in %.1f sec - %.1f kB/sec average\n",
+		(int) ((long long) Numout * Blocksize) >> 10,
+		diff, out );
 	exit(0);
 }
 
@@ -146,7 +166,7 @@ void inputThread()
 			debugmsg("inputThread: read %i\n",num);
 			err = read(In,Buffer[at] + num,Blocksize - num);
 			if (-1 == err) {
-				errormsg("inputThread: error reading: %s\n",strerror(errno));
+				errormsg("\ninputThread: error reading: %s\n",strerror(errno));
 				Finish = 1;
 				pthread_exit((void *) 0);
 			} else if (0 == err) {
@@ -156,7 +176,7 @@ void inputThread()
 				sem_post(&Buf2Dev);
 				infomsg("inputThread: exiting...\n");
 				pthread_exit(0);
-			}
+			} 
 			num += err;
 		} while (num < Blocksize);
 		debugmsg("inputThread: post\n");
@@ -201,16 +221,31 @@ void outputThread()
 		do {
 			debugmsg("outputThread: write %i\n",-num);
 			err = write(Out,Buffer[at++] + num, Outsize > rest ? Outsize : rest );
-			if (Pause)
-				usleep(Pause);
+#ifdef EXPERIMENTAL
+			if ((-1 == err) && (Terminal) && ((errno == ENOMEM) || (errno == ENOSPC))) {
+				fsync(Out);
+				fprintf(Terminal,"\nvolume full - insert new media and press return whe ready...\n");
+				tcflush(fileno(Terminal),TCIFLUSH);
+				fgetc(Terminal);
+				fprintf(Terminal,"\nOK - continuing...\n");
+				if (-1 == lseek(Out,0,SEEK_SET))
+					errormsg("error seeking to pos 0: %s\n",strerror(errno));
+				continue;
+			} else if (-1 == err) {
+#else
 			if (-1 == err) {
+#endif
 				errormsg("outputThread: error writing: %s\n",strerror(errno));
 				Finish = 1;
 				pthread_exit((void *) -1);
 			}
 			rest -= err;
+			if (Pause)
+				usleep(Pause);
 		} while (rest > 0);
 		if (Finish && (0 == fill)) {
+			infomsg("syncing...\n");
+			fsync(Out);
 			infomsg("outputThread: finished - exiting...\n");
 			close(Out);
 			pthread_exit(0);
@@ -257,24 +292,24 @@ void version()
 void usage()
 {
 	fprintf(stderr,
-		"mbuffer [Options]\n\n"\
-		"Options:\n"\
-		"-b <num>   : use <num> blocks for buffer (default %i)\n"\
-		"-s <size>  : use block of <size> bytes for buffer (default %i)\n"\
+		"mbuffer [Options]\n\n"
+		"Options:\n"
+		"-b <num>   : use <num> blocks for buffer (default %i)\n"
+		"-s <size>  : use block of <size> bytes for buffer (default %i)\n"
 		"-m <size>  : use buffer of a total of <size> bytes\n"
 #ifdef HAVE_MMAP
-		"-t         : use memory mapped file (for huge buffer)\n"
+		"-t         : use memory mapped temporary file (for huge buffer)\n"
 #endif
-		"-p <num>   : start writing after buffer has been filled <num>%%\n"\
-		"-i <file>  : use <file> for input\n"\
-		"-o <file>  : use <file> for output\n"\
-		"-T <file>  : as -t but uses <file> as buffer\n"\
-		"-l <file>  : use <file> for logging messages\n"\
-		"-u <num>   : pause <num> microseconds after each write\n"\
-		"-f         : overwrite existing files\n"\
-		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"\
-		"-q         : quiet - do not display the status on stderr\n"\
-		"--version  : print version information\n\n"\
+		"-p <num>   : start writing after buffer has been filled <num>%%\n"
+		"-i <file>  : use <file> for input\n"
+		"-o <file>  : use <file> for output\n"
+		"-T <file>  : as -t but uses <file> as buffer\n"
+		"-l <file>  : use <file> for logging messages\n"
+		"-u <num>   : pause <num> microseconds after each write\n"
+		"-f         : overwrite existing files\n"
+		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"
+		"-q         : quiet - do not display the status on stderr\n"
+		"--version  : print version information\n\n"
 		"Unsupported buffer options: -t -Z -B\n",
 		Numblocks,Blocksize);
 	exit(0);
@@ -297,7 +332,7 @@ int calcint(char **argv, int c, int d)
 		case 'B':
 			return i;
 		default:
-			errormsg("unrecognized size charakter '%c' in option\n",c);
+			fatal("unrecognized size charakter '%c' in option\n",c);
 			return d;
 		}
 	case 1:
@@ -423,7 +458,7 @@ int main(int argc, char **argv)
 		write(Tmp,&c,sizeof(int));
 		Buffer[0] = mmap(0,Blocksize*Numblocks,PROT_READ|PROT_WRITE,MAP_PRIVATE,Tmp,0);
 		if (MAP_FAILED == Buffer[0])
-			perror("could not map buffer-file to memory");
+			fatal("could not map buffer-file to memory: %s\n",strerror(errno));
 		debugmsg("temporary file mapped to address %p\n",Buffer[0]);
 	} else {
 #endif
@@ -437,9 +472,9 @@ int main(int argc, char **argv)
 
 	debugmsg("creating semaphore...\n");
 	if (0 != sem_init(&Buf2Dev,0,0))
-		perror("Error creating semaphore");
+		fatal("Error creating semaphore: %s\n",strerror(errno));
 	if (0 != sem_init(&Dev2Buf,0,Numblocks))
-		perror("Error creating semaphore");
+		fatal("Error creating semaphore: %s\n",strerror(errno));
 
 	debugmsg("opening streams...\n");
 	if (inFile) {
@@ -449,22 +484,35 @@ int main(int argc, char **argv)
 		In = fileno(stdin);
 	if (outFile) {
 		if (-1 == (Out = open(outFile,nooverwrite|O_CREAT|O_WRONLY|O_TRUNC,0666)))
-			perror("could not open output file");
+			fatal("could not open output file: %s\n",strerror(errno));
 	} else
 		Out = fileno(stdout);
 
 #ifdef HAVE_ST_BLKSIZE
-	infomsg("checking blocksize for output");
-	if (-1 == stat(Out,&st))
-		perror("could not stat output");
-	debugmsg("blocksize on output stream is %i\n",st.st_blksize);
-	if (Blocksize%st.st_blksize != 0)
-		warningmsg("Blocksize should be a multiple of the blocksize of the output stream (is %i)!",st.st_blksize);
-	if (Blocksize != st.st_blksize) {
-		infomsg("setting output blocksize to %i\n",st.st_blksize);
-		Outsize = st.st_blksize;
-	}
+	debugmsg("checking blocksize for output...\n");
+	if (-1 == fstat(Out,&st))
+		fatal("could not stat output: %s\n",strerror(errno));
+	if ((st.st_mode & S_IFBLK) || (st.st_mode & S_IFCHR)) {
+		infomsg("blocksize on output device is %i\n",st.st_blksize);
+		if (Blocksize%st.st_blksize != 0)
+			warningmsg("Blocksize should be a multiple of the blocksize of the output device (is %i)!\n",st.st_blksize);
+		if (Blocksize != st.st_blksize) {
+			infomsg("setting output blocksize to %i\n",st.st_blksize);
+			Outsize = st.st_blksize;
+		}
+	} else
+		infomsg("no device on output stream\n");
 #endif
+
+	if (Status) {
+		debugmsg("accessing terminal...\n");
+		Terminal = fopen("/dev/tty","r+");
+		if (!Terminal) {
+			errormsg("could not open terminal: %s\n",strerror(errno));
+			warningmsg("no multi volume support");
+			Status = 0;
+		}
+	}
 
 	debugmsg("registering signals...\n");
 	signal(SIGINT,sigHandler);
