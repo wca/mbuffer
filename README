@@ -65,6 +65,15 @@ This software has been tested under the following operatingsystems:
 - tru64
 
 
+64 Bit Buffers:
+===============
+The buffer limit is 2G x Blocksize. This limit is
+caused by the posix semaphore interface which is based on an
+int, which is on all architectures a 32 Bit word. So
+if you want to use realy huge buffers you need to set a
+huge blocksize.
+
+
 TODO:
 =====
 # fix: warnings for tru64 compilation

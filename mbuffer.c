@@ -16,12 +16,13 @@
 
 
 pthread_t Reader, Writer;
-int Verbose = 3, Finish = 0, In, Out, Tmp, Rest = 0, Numin = 0,
-    Numout = 0, Pause = 0, Memmap = 0, Status = 1, Outsize = 0;
+int Verbose = 3, Finish = 0, In, Out, Tmp, Rest = 0, Pause = 0, 
+	Memmap = 0, Status = 1, Outsize = 0, Nooverwrite = O_EXCL, 
+	Numblocks = 256;
+unsigned long long Blocksize = 10240, Numin = 0, Numout = 0;
 float Start = 0;
 char *Tmpfile = 0, **Buffer;
 const char *Infile = 0, *Outfile = 0;
-int Blocksize = 10240, Nooverwrite = O_EXCL, Numblocks = 256;
 #ifdef MULTIVOLUME
 int Multivolume = 0;
 #endif
@@ -108,8 +109,8 @@ void terminate()
 		ftime(&now);
 		diff = now.time - Starttime.time + (float) now.millitm / 1000 - (float) Starttime.millitm / 1000;
 		out = (float)(((long long) Numout * Blocksize) >> 10) / diff;
-		fprintf(Terminal,"\nsummary: %i kB in %.1f sec - %.1f kB/sec average\n",
-			(int) ((long long) Numout * Blocksize) >> 10,
+		fprintf(Terminal,"\nsummary: %Lu kB in %.1f sec - %.1f kB/sec average\n",
+			(Numout * Blocksize) >> 10,
 			diff, out );
 	}
 	exit(0);
@@ -131,7 +132,8 @@ void statusThread()
 {
 	struct timeb last, now;
 	float in = 0, out = 0, diff, fill;
-	int total, rest, lin = 0, lout = 0;
+	unsigned long long total, lin = 0, lout = 0;
+	int rest;
 
 	ftime(&Starttime);
 	last.time = Starttime.time;
@@ -150,9 +152,9 @@ void statusThread()
 		lout = Numout;
 		last.time = now.time;
 		last.millitm = now.millitm;
-		total = ((long long)Numout * Blocksize) >> 10;
+		total = (Numout * Blocksize) >> 10;
 		fill = (fill < 0) ? 0 : fill;
-		fprintf(Terminal,"\rin at %8.1f kB/sec - out at %8.1f kB/sec - %i kB totally transfered - buffer %3.0f%% full",in,out,total,fill);
+		fprintf(Terminal,"\rin at %8.1f kB/sec - out at %8.1f kB/sec - %Lu kB totally transfered - buffer %3.0f%% full",in,out,total,fill);
 		fflush(Terminal);
 		usleep(500000);
 		sem_getvalue(&Buf2Dev,&rest);
@@ -168,8 +170,8 @@ void statusThread()
 	ftime(&now);
 	diff = now.time - Starttime.time + (float) now.millitm / 1000 - (float) Starttime.millitm / 1000;
 	out = (float)(((long long) Numout * Blocksize) >> 10) / diff;
-	fprintf(Terminal,"summary: %i kB in %.1f sec - %.1f kB/sec average\n",
-		(int) ((long long) Numout * Blocksize) >> 10,
+	fprintf(Terminal,"summary: %Lu kB in %.1f sec - %.1f kB/sec average\n",
+		(Numout * Blocksize) >> 10,
 		diff, out );
 	exit(0);
 }
@@ -340,7 +342,7 @@ void usage()
 		"mbuffer [Options]\n\n"
 		"Options:\n"
 		"-b <num>   : use <num> blocks for buffer (default %i)\n"
-		"-s <size>  : use block of <size> bytes for buffer (default %i)\n"
+		"-s <size>  : use block of <size> bytes for buffer (default %Lu)\n"
 		"-m <size>  : use buffer of a total of <size> bytes\n"
 #ifdef HAVE_MMAP
 		"-t         : use memory mapped temporary file (for huge buffer)\n"
@@ -363,12 +365,12 @@ void usage()
 	exit(0);
 }
 
-int calcint(char **argv, int c, int d)
+unsigned long long calcint(char **argv, int c, unsigned long long d)
 {
 	char ch;
-	int i;
+	unsigned long long i;
 	
-	switch (sscanf(argv[c],"%i%c",&i,&ch)) {
+	switch (sscanf(argv[c],"%Lu%c",&i,&ch)) {
 	case 2:
 		switch (ch) {
 		case 'k':
@@ -403,8 +405,8 @@ int argcheck(const char *opt, char **argv, int *c)
 
 int main(int argc, char **argv)
 {
-	int c, totalmem = 0;
-	int optMset = 0, optSset = 0, optBset = 0;
+	unsigned long long totalmem = 0;
+	int c, optMset = 0, optSset = 0, optBset = 0;
 #ifdef HAVE_ST_BLKSIZE
 	struct stat st;
 #endif
@@ -414,11 +416,11 @@ int main(int argc, char **argv)
 		if (!argcheck("-s",argv,&c)) {
 			Blocksize = calcint(argv,c,Blocksize);
 			optSset = 1;
-			debugmsg("Blocksize set to %i\n",Blocksize);
+			debugmsg("Blocksize set to %Lu\n",Blocksize);
 		} else if (!argcheck("-m",argv,&c)) {
 			totalmem = calcint(argv,c,totalmem);
 			optMset = 1;
-			debugmsg("totalmem set to %i\n",totalmem);
+			debugmsg("totalmem set to %Lu\n",totalmem);
 		} else if (!argcheck("-b",argv,&c)) {
 			Numblocks = (atoi(argv[c])) ? (atoi(argv[c])) : Numblocks;
 			optBset = 1;
@@ -484,11 +486,14 @@ int main(int argc, char **argv)
 		if (Numblocks * Blocksize != totalmem)
 			fatal("inconsistent options: blocksize * number of blocks != totalsize!\n");
 	} else if ((!optBset&optSset&optMset) || (optMset&!optBset&!optSset)) {
+		if ((totalmem / Blocksize) >= (1 << 31))
+			fatal("maximum number of managable blocks is %Li\n"
+				"Try a bigger blocksize!\n",1 << 31);
 		Numblocks = totalmem / Blocksize;
 		infomsg("Numblocks set to %i\n",Numblocks);
 	} else if (optBset&!optSset&optMset) {
 		Blocksize = totalmem / Numblocks;
-		infomsg("blocksize set to %i\n",Blocksize);
+		infomsg("blocksize set to %Lu\n",Blocksize);
 	}
 #ifdef MULTIVOLUME
 	/* multi volume input consistency checking */

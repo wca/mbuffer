@@ -645,7 +645,7 @@ test "$exec_prefix" = NONE && exec_prefix=$prefix
 
 PACKAGE=mbuffer
 
-VERSION=20010621
+VERSION=20010622
 cat >> confdefs.h <<EOF
 #define VERSION "${VERSION}"
 EOF
@@ -1138,20 +1138,20 @@ if test -n "$GCC"; then
         CXXFLAGS="$CXXFLAGS -Wall"
         case "$target_cpu" in
                 i386*)
-                CFLAGS="$CFLAGS -m386"
-                CXXFLAGS="$CXXFLAGS -m386"
+                CFLAGS="$CFLAGS -march=i386"
+                CXXFLAGS="$CXXFLAGS -march=i386"
                 ;;
                 i486*)
-                CFLAGS="$CFLAGS -m486"
-                CXXFLAGS="$CXXFLAGS -m486"
+                CFLAGS="$CFLAGS -march=i486"
+                CXXFLAGS="$CXXFLAGS -march=i486"
                 ;;
                 i586*)
-                CFLAGS="$CFLAGS -mpentium"
-                CXXFLAGS="$CXXFLAGS -mpentium"
+                CFLAGS="$CFLAGS -march=pentium"
+                CXXFLAGS="$CXXFLAGS -march=pentium"
                 ;;
                 i686*)
-                CFLAGS="$CFLAGS -mpentiumpro"
-                CXXFLAGS="$CXXFLAGS -mpentiumpro"
+                CFLAGS="$CFLAGS -march=pentiumpro"
+                CXXFLAGS="$CXXFLAGS -march=pentiumpro"
                 ;;
         esac
 fi
