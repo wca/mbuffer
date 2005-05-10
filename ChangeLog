@@ -1,3 +1,8 @@
+20050510:
+- fixed possible lockup upon SIGINTR
+- fixed displayed time
+- updated display to change to MB instead of kB when > 3072kB
+
 20050321:
 - compile time fix for gentoo and suse 9.2
 - made --enable-debug and --enable-md5 work

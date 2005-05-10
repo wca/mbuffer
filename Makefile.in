@@ -1,6 +1,6 @@
 CC		= @CC@
 DEFS		= @DEFS@
-CFLAGS		= -O @CFLAGS@ $(DEFS)
+CFLAGS		= @CFLAGS@ $(DEFS)
 LDFLAGS		= @LDFLAGS@
 LIBS		= @LIBS@
 

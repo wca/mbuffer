@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <string.h>
-#include <sys/timeb.h>
+#include <sys/time.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <termios.h>
@@ -36,7 +36,7 @@ pthread_t Reader, Writer;
 long Verbose = 3, In, Out, Tmp, Pause = 0, Memmap = 0, Status = 1, 
 	Outsize = 10240, Nooverwrite = O_EXCL, Outblocksize = 0,
 	Autoloader = 0, Hash = 0, Sock = 0;
-volatile int Rest = 0, Finish = 0;
+volatile int Rest = 0, Finish = 0, Terminate = 0;
 unsigned long long Blocksize = 10240, Numblocks = 256;
 volatile unsigned long long Numin = 0, Numout = 0;
 float StartWrite = 0, StartRead = 1;
@@ -51,7 +51,7 @@ MD5_CTX md5ctxt;
 sem_t Dev2Buf,Buf2Dev,PercentageHigh,PercentageLow;
 pthread_mutex_t TermMut;
 FILE *Log = 0, *Terminal = 0;
-struct timeb Starttime;
+struct timeval Starttime;
 
 
 #ifdef DEBUG
@@ -117,9 +117,10 @@ void fatal(const char *msg, ...)
 
 void summary(unsigned long long numb, float secs)
 {
-	int h = (int) secs/3600, m = (int) secs/60;
+	int h = (int) secs/3600, m = (int) (secs - h * 3600)/60;
 	double av = (double)numb/secs;
 	
+	secs -= m * 60 + h * 3600;
 	fprintf(Terminal,"\nsummary: ");
 	if (numb < 1331ULL)			/* 1.3 kB */
 		fprintf(Terminal,"%llu Byte in ",numb);
@@ -172,27 +173,10 @@ void summary(unsigned long long numb, float secs)
 
 void terminate(void)
 {
-	float diff;
-	struct timeb now;
-
 	infomsg("\rterminating...\n");
+	Terminate = 1;
 	pthread_cancel(Reader);
 	pthread_cancel(Writer);
-
-	pthread_join(Reader,0);
-	pthread_join(Writer,0);
-	if (Memmap)
-		munmap(Buffer[0],Blocksize*Numblocks);
-	if (Sock)
-		close(Sock);
-	close(Tmp);
-	remove(Tmpfile);
-	if (Status) {
-		ftime(&now);
-		diff = now.time - Starttime.time + (float) now.millitm / 1000 - (float) Starttime.millitm / 1000;
-		summary(Numout * Blocksize + Rest,diff);
-	}
-	exit(0);
 }
 
 
@@ -217,34 +201,45 @@ RETSIGTYPE sigHandler(int signr)
 
 void statusThread(void) 
 {
-	struct timeb last, now;
+	struct timeval last, now;
 	float in = 0, out = 0, diff, fill;
 	unsigned long long total, lin = 0, lout = 0;
 	int unwritten;
 
-	ftime(&Starttime);
-	last.time = Starttime.time;
-	last.millitm = Starttime.millitm;
+	gettimeofday(&Starttime,0);
+	last = Starttime;
 	usleep(1000);	/* needed on alpha (stderr fails with fpe on nan) */
-	while (!(Finish && (unwritten == 0))) {
+	while (!(Finish && (unwritten == 0)) && (Terminate == 0)) {
 		int err;
+		char id = 'k', od = 'k', td = 'M';
 		sem_getvalue(&Buf2Dev,&unwritten);
 		fill = (float)unwritten / (float)Numblocks * 100.0;
-		ftime(&now);
-		diff = now.time - last.time + (float) now.millitm / 1000 - (float) last.millitm / 1000;
+		gettimeofday(&now,0);
+		diff = now.tv_sec - last.tv_sec + (float) now.tv_usec / 1000000 - (float) last.tv_usec / 1000000;
 		in = ((Numin - lin) * Blocksize) >> 10;
 		in /= diff;
+		if (in > 3 * 1024) {
+			id = 'M';
+			in /= 1024;
+		}
 		out = ((Numout - lout) * Blocksize) >> 10;
 		out /= diff;
+		if (out > 3 * 1024) {
+			od = 'M';
+			out /= 1024;
+		}
 		lin = Numin;
 		lout = Numout;
-		last.time = now.time;
-		last.millitm = now.millitm;
+		last = now;
 		total = (Numout * Blocksize) >> 10;
+		if (total > 3 * 1024) {
+			td = 'M';
+			total >>= 10;
+		}
 		fill = (fill < 0) ? 0 : fill;
 		err = pthread_mutex_lock(&TermMut);
 		assert(0 == err);
-		fprintf(Terminal,"\r%8.1f kB/s in - %8.1f kB/s out - %llu kB total - buffer %3.0f%% full",in,out,total,fill);
+		fprintf(Terminal,"\rin @ %6.1f %cB/s, out @ %6.1f %cB/s, %llu %cB total, buffer %3.0f%% full",in,id,out,od,total,td,fill);
 		fflush(Terminal);
 		err = pthread_mutex_unlock(&TermMut);
 		assert(0 == err);
@@ -258,8 +253,8 @@ void statusThread(void)
 		munmap(Buffer[0],Blocksize*Numblocks);
 	close(Tmp);
 	remove(Tmpfile);
-	ftime(&now);
-	diff = now.time - Starttime.time + (float) now.millitm / 1000.0 - (float) Starttime.millitm / 1000.0;
+	gettimeofday(&now,0);
+	diff = now.tv_sec - Starttime.tv_sec + (float) now.tv_usec / 1000000 - (float) Starttime.tv_usec / 1000000;
 	summary(Numout * Blocksize + Rest, diff);
 	exit(0);
 }
@@ -323,7 +318,15 @@ void *inputThread(void *ignored)
 			sem_wait(&PercentageLow);
 		}
 		debugmsg("inputThread: sem_wait\n");
-		sem_wait(&Dev2Buf); // Wait for one or more buffer blocks to be free
+		sem_wait(&Dev2Buf); /* Wait for one or more buffer blocks to be free */
+		/*
+		if (Terminate) {	// for async termination requests
+			
+			debugmsg("inputThread: terminating upon termination request...\n");
+			close(In);
+			pthread_exit(0);
+		}
+		*/
 		num = 0;
 		do {
 			err = read(In,Buffer[at] + num,Blocksize - num);
@@ -466,6 +469,13 @@ void *outputThread(void *ignored)
 			sem_wait(&PercentageHigh);
 		}
 		sem_wait(&Buf2Dev);
+		/*
+		if (Terminate) {
+			debugmsg("outputThread: terminating upon termination request...\n");
+			close(Out);
+			pthread_exit(0);
+		}
+		*/
 		if (Finish) {
 			debugmsg("outputThread: inputThread finished, %d blocks remaining\n",fill);
 			sem_getvalue(&Buf2Dev,&fill);
@@ -977,4 +987,5 @@ int main(int argc, const char **argv)
 	return 0;
 }
 
-// vim:tw=0
+/* vim:tw=0
+ */
