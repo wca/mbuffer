@@ -17,7 +17,7 @@ OBJECTS		= $(SOURCES:.c=.o)
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
-	$(CC) $(LDFLAGS) $(LIBS) $(OBJECTS) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $(LIBS) $(OBJECTS) -o $@
 
 clean:
 	-$(RM) $(OBJECTS)

@@ -59,6 +59,9 @@ log messages to \fIfile\fP instead of standard error output
 \fB\-u\fR <\fInum\fP>
 pause \fInum\fP microseconds after each write \- might increase performance on some drives with very low performace (< 1 MB/sec)
 .TP
+\fB\-A\fR <\fIcmd\fP>
+used devices is an autoloader which uses \fIcmd\fP to load the next volume
+.TP
 \fB\-a\fR <\fItime\fP>
 used device is an autoloader which takes \fItime\fP seconds to load a new tape
 .TP 

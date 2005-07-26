@@ -19,18 +19,15 @@ mbuffer is a raplacement for buffer with additional functionality:
 # multi-volume support
 # auto-loader support (TEST IT!)
 # compatible command-line options
-# --? bugs to hunt ?-- :-((
+# --? bugs to hunt ?-- :-(
 
 
-NETWORKING (BETA):
+NETWORKING:
 ==================
 The included networking code is based on TCP and should
-therefore be fairly stable out of the box. To use it
+therefore be fairly robust out of the box. To use it
 you should know the basics of TCP/IP. Use only
 on a trusted LAN, as there is no builtin security.
-This code is known to not compile on Tru64.
-Use configure option --enable-networking to include
-this code.
 
 
 TESTING:
@@ -40,27 +37,39 @@ to test the program I do the following:
 # tar cf - /usr | mbuffer -t | tar tf - > out
 
 
-ARCHITECTURES:
-==============
+ARCHITECTURES and PLATFORMS:
+============================
 This software has been tested under the following operatingsystems:
-- linux 2.2.x
-- linux 2.4.x
-- solaris 8
-- tru64
+- solaris 8 (SPARC and x86) and later
+  - no known issues
+  - do not put your temporary files on a tmpfs filesystem,
+    as this is equivalent to a normal memory allocated buffer
+- linux 2.2 (x86) and later
+  - some pthread versions of linux seem to have problems with
+    cancellation, causing a segmentation fault upon SIGINTR
+- tru64-alpha 
+  - broken display
+- FreeBSD 5.x (x86)
 
 
 64 Bit Buffers:
 ===============
-The buffer limit is 2G x Blocksize. This limit is
-caused by the posix semaphore interface which is based on an
-int, which is on all architectures a 32 Bit word. So
-if you want to use realy huge buffers you need to set a
-huge blocksize.
+The buffer limit is sysconf(_SC_SEM_VALUE_MAX)*Blocksize. This
+usually limits the maximum number of blocks to 2G-1, because
+semaphores are implemented using an int, which is on most architectures
+a 32 Bit word. This limit is currently a non-issue, but might be resolved
+in a future release, by using condition variables.
+
+If the total buffer size is 2GB or larger, you will need to compile
+mbuffer as a 64bit executable. This requires that you have a 64bit
+processor. Compiling with gcc you will need to pass -m64 as CFLAGS
+to configure. E.g.:
+CFLAGS="-O -g -m64" ./configure
+For Sun's Studio Compiler the equivalent flag is -xarch=v9.
 
 
 TODO:
 =====
-# make networking compile under tru64
 # fix: warnings for tru64 compilation
 # fix: unknown bugs
 
@@ -68,5 +77,6 @@ TODO:
 FEEDBACK:
 =========
 It is always nice to get feedback. If you encounter
-a problem or a bug, send me a note.
+a problem or a bug, send me a note. Requests for enhancements
+are also welcome.
 (software@maier-komor.de)

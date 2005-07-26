@@ -1,3 +1,22 @@
+20050726:
+- added support for openssl based md5 hashing
+- support of transfer summary in gigabyte
+- support for passing buffer size in gigabyte (G)
+  (please pass the relevant CFLAGS for 64Bit executables for
+   your compiler to configure)
+- added support for passing command to autoloader 
+  (patch submitted by Wolfgang Denk)
+- enhanced network parameter parsing
+- FIX: transient error in status display
+- FIX: mbuffer could hang on first SIGINTR (chance 1/3)
+- fixed a bug in network client verification code
+- pass CFLAGS also to link phase
+- unlink tmpfile as early as possible
+- check close for errors
+  (see Chris Gerhard's Weblog concerning close on
+  http://blogs.sun.com/roller/page/chrisg?anchor=did_that_close_succeed)
+- additional sanity checks for buffer limits
+
 20050510:
 - fixed possible lockup upon SIGINTR
 - fixed displayed time

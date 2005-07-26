@@ -21,6 +21,9 @@
 #include <mhash.h>
 #elif defined HAVE_LIBMD5
 #include <md5.h>
+#elif defined HAVE_LIBSSL
+#include <md5global.h>
+#include <md5.h>
 #endif
 
 #include <sys/types.h>
@@ -33,19 +36,21 @@
 
 
 pthread_t Reader, Writer;
-long Verbose = 3, In, Out, Tmp, Pause = 0, Memmap = 0, Status = 1, 
+long Verbose = 3, In = 0, Out = 0, Tmp = 0, Pause = 0, Memmap = 0, Status = 1, 
 	Outsize = 10240, Nooverwrite = O_EXCL, Outblocksize = 0,
-	Autoloader = 0, Hash = 0, Sock = 0;
+	Autoloader = 0, Autoload_time = 0, Hash = 0, Sock = 0;
 volatile int Rest = 0, Finish = 0, Terminate = 0;
 unsigned long long Blocksize = 10240, Numblocks = 256;
 volatile unsigned long long Numin = 0, Numout = 0;
 float StartWrite = 0, StartRead = 1;
 char *Tmpfile = 0, **Buffer;
-const char *Infile = 0, *Outfile = 0, *Tape = 0;
+const char *Infile = 0, *Outfile = 0, *Tape = 0, *Autoload_cmd = 0;
 int Multivolume = 0;
 #ifdef HAVE_LIBMHASH
-HAVE_LIBMHASH MD5hash;
+MHASH MD5hash;
 #elif defined HAVE_LIBMD5
+MD5_CTX md5ctxt;
+#elif defined HAVE_LIBSSL
 MD5_CTX md5ctxt;
 #endif
 sem_t Dev2Buf,Buf2Dev,PercentageHigh,PercentageLow;
@@ -110,7 +115,7 @@ void fatal(const char *msg, ...)
 		vfprintf(Log,msg,val);
 		va_end(val);
 	}
-	exit(-1);
+	exit(1);
 }
 
 
@@ -166,6 +171,17 @@ void summary(unsigned long long numb, float secs)
 			fprintf(Terminal," %02x",hashvalue[i]);
 		fprintf(Terminal,"\n");
 	}
+#elif defined HAVE_LIBSSL
+	if (Hash) {
+		unsigned char hashvalue[16];
+		int i;
+		
+		MD5_Final(hashvalue,&md5ctxt);
+		fprintf(Terminal,"md5 hash:");
+		for (i = 0; i < 16; ++i)
+			fprintf(Terminal," %02x",hashvalue[i]);
+		fprintf(Terminal,"\n");
+	}
 #endif
 }
 
@@ -175,8 +191,13 @@ void terminate(void)
 {
 	infomsg("\rterminating...\n");
 	Terminate = 1;
-	pthread_cancel(Reader);
-	pthread_cancel(Writer);
+	if (pthread_equal(pthread_self(),Reader)) {
+		pthread_cancel(Writer);
+		pthread_cancel(Reader);
+	} else {
+		pthread_cancel(Reader);
+		pthread_cancel(Writer);
+	}
 }
 
 
@@ -211,7 +232,7 @@ void statusThread(void)
 	usleep(1000);	/* needed on alpha (stderr fails with fpe on nan) */
 	while (!(Finish && (unwritten == 0)) && (Terminate == 0)) {
 		int err;
-		char id = 'k', od = 'k', td = 'M';
+		char id = 'k', od = 'k', td = 'k';
 		sem_getvalue(&Buf2Dev,&unwritten);
 		fill = (float)unwritten / (float)Numblocks * 100.0;
 		gettimeofday(&now,0);
@@ -236,10 +257,14 @@ void statusThread(void)
 			td = 'M';
 			total >>= 10;
 		}
+		if (total > 3 * 1024) {
+			td = 'G';
+			total >>= 10;
+		}
 		fill = (fill < 0) ? 0 : fill;
 		err = pthread_mutex_lock(&TermMut);
 		assert(0 == err);
-		fprintf(Terminal,"\rin @ %6.1f %cB/s, out @ %6.1f %cB/s, %llu %cB total, buffer %3.0f%% full",in,id,out,od,total,td,fill);
+		fprintf(Terminal,"\rin @ %6.1f %cB/s, out @ %6.1f %cB/s, %4llu %cB total, buffer %3.0f%% full",in,id,out,od,total,td,fill);
 		fflush(Terminal);
 		err = pthread_mutex_unlock(&TermMut);
 		assert(0 == err);
@@ -252,7 +277,6 @@ void statusThread(void)
 	if (Memmap)
 		munmap(Buffer[0],Blocksize*Numblocks);
 	close(Tmp);
-	remove(Tmpfile);
 	gettimeofday(&now,0);
 	diff = now.tv_sec - Starttime.tv_sec + (float) now.tv_usec / 1000000 - (float) Starttime.tv_usec / 1000000;
 	summary(Numout * Blocksize + Rest, diff);
@@ -263,22 +287,30 @@ void statusThread(void)
 
 void requestInputVolume(void)
 {
-	char cmd[15+strlen(Infile)];
+	char cmd_buf[15+strlen(Infile)];
+	const char *cmd;
 	int err;
 
 	debugmsg("requesting new volume for input\n");
-	close(In);
+	if (-1 == close(In))
+		errormsg("error closing input: %s\n",strerror(errno));
 	do {
 		if ((Autoloader) && (Infile)) {
 			infomsg("requesting change of volume...\n");
-			sprintf(cmd,"mt -f %s offline",Infile);
+			if (Autoload_cmd) {
+				cmd = Autoload_cmd;
+			} else {
+				sprintf(cmd_buf, "mt -f %s offline", Infile);
+				cmd = cmd_buf;
+			}
 			if (-1 == system(cmd)) {
-				warningmsg("error executing mt to change volume in autoloader...\n");
+				warningmsg("error running \"%s\" to change volume in autoloader...\n", cmd);
 				Autoloader = 0;
 				continue;
 			}
 			infomsg("waiting for drive to get ready...\n");
-			sleep(Autoloader);
+			if (Autoload_time)
+				sleep(Autoload_time);
 		} else {
 			int err1;
 			err1 = pthread_mutex_lock(&TermMut);
@@ -319,14 +351,13 @@ void *inputThread(void *ignored)
 		}
 		debugmsg("inputThread: sem_wait\n");
 		sem_wait(&Dev2Buf); /* Wait for one or more buffer blocks to be free */
-		/*
 		if (Terminate) {	// for async termination requests
 			
 			debugmsg("inputThread: terminating upon termination request...\n");
-			close(In);
+			if (-1 == close(In))
+				errormsg("error closing input: %s\n",strerror(errno));
 			pthread_exit(0);
 		}
-		*/
 		num = 0;
 		do {
 			err = read(In,Buffer[at] + num,Blocksize - num);
@@ -353,6 +384,9 @@ void *inputThread(void *ignored)
 				#elif defined HAVE_LIBMD5
 				if (Hash)
 					MD5Update(&md5ctxt,Buffer[at],num);
+				#elif defined HAVE_LIBSSL
+				if (Hash)
+					MD5_Update(&md5ctxt,Buffer[at],num);
 				#endif
 				sem_post(&Buf2Dev);
 				sem_post(&PercentageHigh);
@@ -368,6 +402,9 @@ void *inputThread(void *ignored)
 		#elif defined HAVE_LIBMD5
 		if (Hash)
 			MD5Update(&md5ctxt,Buffer[at],num);
+		#elif defined HAVE_LIBSSL
+		if (Hash)
+			MD5_Update(&md5ctxt,Buffer[at],num);
 		#endif
 		sem_post(&Buf2Dev);
 		sem_getvalue(&Buf2Dev,&fill);
@@ -390,7 +427,8 @@ void *inputThread(void *ignored)
 
 void requestOutputVolume(void)
 {
-	char cmd[15+strlen(Outfile)];
+	char cmd_buf[15+strlen(Outfile)];
+	const char *cmd;
 
 	if (!Outfile) {
 		errormsg("End of volume, but not end of input:\n"
@@ -399,18 +437,25 @@ void requestOutputVolume(void)
 		pthread_exit((void *) -1);
 	}
 	debugmsg("requesting new output volume\n");
-	close(Out);
+	if (-1 == close(Out))
+		errormsg("error closing output: %s\n",strerror(errno));
 	do {
 		if ((Autoloader) && (Outfile)) {
 			infomsg("requesting change of volume...\n");
-			sprintf(cmd,"mt -f %s offline",Outfile);
+			if (Autoload_cmd) {
+				cmd = Autoload_cmd;
+			} else {
+				sprintf(cmd_buf, "mt -f %s offline", Infile);
+				cmd = cmd_buf;
+			}
 			if (-1 == system(cmd)) {
-				warningmsg("error executing mt to change volume in autoloader...\n");
+				warningmsg("error running \"%s\" to change volume in autoloader...\n", cmd);
 				Autoloader = 0;
 				continue;
 			}
 			infomsg("waiting for drive to get ready...\n");
-			sleep(Autoloader);
+			if (Autoload_time)
+				sleep(Autoload_time);
 		} else {
 			int err;
 			err = pthread_mutex_lock(&TermMut);
@@ -469,13 +514,12 @@ void *outputThread(void *ignored)
 			sem_wait(&PercentageHigh);
 		}
 		sem_wait(&Buf2Dev);
-		/*
 		if (Terminate) {
 			debugmsg("outputThread: terminating upon termination request...\n");
-			close(Out);
+			if (-1 == close(Out)) 
+				errormsg("error closing output: %s\n",strerror(errno));;
 			pthread_exit(0);
 		}
-		*/
 		if (Finish) {
 			debugmsg("outputThread: inputThread finished, %d blocks remaining\n",fill);
 			sem_getvalue(&Buf2Dev,&fill);
@@ -521,7 +565,8 @@ void *outputThread(void *ignored)
 				infomsg("syncing...\n");
 				fsync(Out);
 				infomsg("outputThread: finished - exiting...\n");
-				close(Out);
+				if (-1 == close(Out))
+					errormsg("error closing output: %s\n",strerror(errno));
 				pthread_exit(0);
 			}
 		}
@@ -542,22 +587,22 @@ void *outputThread(void *ignored)
 
 void openNetworkInput(const char *host, unsigned short port)
 {
-	struct sockaddr_in saddr, caddr;
-	size_t clen;
+	struct sockaddr_in saddr;
+	struct sockaddr_in caddr;
+	size_t clen = sizeof(caddr);
 	struct hostent *h = 0, *r = 0;
-	char *rhost = 0;
 
 	debugmsg("openNetworkInput(%s,%hu)\n",host,port);
 	infomsg("creating socket for network input...\n");
 	Sock = socket(AF_INET, SOCK_STREAM, 6);
 	if (0 > Sock)
 		fatal("could not create socket for network input: %s\n",strerror(errno));
-	bzero((void *) &saddr, sizeof(saddr));
 	if (host) {
 		debugmsg("resolving hostname of input interface...\n");
 		if (0 == (h = gethostbyname(host)))
 			fatal("could not resolve server hostname: %s\n",hstrerror(h_errno));
 	}
+	bzero((void *) &saddr, sizeof(saddr));
 	saddr.sin_family = AF_INET;
 	saddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	saddr.sin_port = htons(port);
@@ -568,20 +613,29 @@ void openNetworkInput(const char *host, unsigned short port)
 	if (0 > listen(Sock,1))		/* accept only 1 incoming connection */
 		fatal("could not listen on socket for network input: %s\n",strerror(errno));
 	do {
-		if (0 < In) {
-			close(In);
-			rhost = inet_ntoa(caddr.sin_addr);
-			r = gethostbyaddr(rhost,strlen(rhost),AF_INET);
-			if (r)
-				errormsg("rejected connection from %s (%s)\n",r->h_name,rhost);
-			else
-				errormsg("rejected connection from %s\n",rhost);
-		}
+		char **p;
 		infomsg("waiting to accept connection...\n");
-		In = accept(Sock, (struct sockaddr *) &caddr, &clen);
+		In = accept(Sock, (struct sockaddr *)&caddr, &clen);
 		if (0 > In)
 			fatal("could not accept connection for network input: %s\n",strerror(errno));
-	} while (memcmp(&caddr.sin_addr,h->h_addr_list[0],h->h_length));
+		if (host == 0) {
+			infomsg("connection accepted");
+			return;
+		}
+		for (p = h->h_addr_list; *p; ++p) {
+			if (0 == memcmp(&caddr.sin_addr,*p,h->h_length)) {
+				infomsg("connection accepted");
+				return;
+			}
+		}
+		r = gethostbyaddr((char *)&caddr.sin_addr,sizeof(caddr.sin_addr.s_addr),AF_INET);
+		if (r)
+			errormsg("rejected connection from %s (%s)\n",r->h_name,inet_ntoa(caddr.sin_addr));
+		else
+			errormsg("rejected connection from %s\n",inet_ntoa(caddr.sin_addr));
+		if (-1 == close(In))
+			errormsg("error closing input: %s\n",strerror(errno));
+	} while (1);
 }
 
 
@@ -610,21 +664,24 @@ void openNetworkOutput(const char *host, unsigned short port)
 
 
 
-void getNetVars(const char **argv, int *c, const char **server, unsigned short *port)
+void getNetVars(const char **argv, int *c, const char **host, unsigned short *port)
 {
-	char *tmpserv;
+	char *tmphost;
 	
-	tmpserv = malloc(strlen(argv[*c] + 1));
-	if (0 == tmpserv)
+	tmphost = malloc(strlen(argv[*c] + 1));
+	if (0 == tmphost)
 		fatal("out of memory\n");
-	if (1 < sscanf(argv[*c],"%[0-9a-zA-Z.]:%hu",tmpserv,port)) {
-		*server = tmpserv;
+	if (1 < sscanf(argv[*c],"%[0-9a-zA-Z.]:%hu",tmphost,port)) {
+		*host = tmphost;
 		return;
 	}
-	free((void *) tmpserv);
+	free((void *) tmphost);
+	if (1 == sscanf(argv[*c],":%hu",port)) {
+		return;
+	}
 	if (0 != (*port = atoi(argv[*c])))
 		return;
-	*server = argv[*c];
+	*host = argv[*c];
 	*port = atoi(argv[*c]);
 	if (*port)
 		(*c)++;
@@ -636,7 +693,7 @@ void version(void)
 {
 	fprintf(stderr,
 		"mbuffer version "VERSION"\n"\
-		"Copyright 2001-2003 - T. Maier-Komor\n"\
+		"Copyright 2001-2005 - T. Maier-Komor\n"\
 		"License: GPL2 - see file COPYING\n");
 	exit(0);
 }
@@ -657,7 +714,8 @@ void usage(void)
 		"-p <num>   : start reading after buffer has been filled less than <num>%%\n"
 		"-i <file>  : use <file> for input\n"
 		"-o <file>  : use <file> for output\n"
-		"-I <h>:<p> : use network port <port> as input\n"
+		"-I <h>:<p> : use network port <port> as input, allow only host <h> to connect\n"
+		"-I <p>     : use network port <port> as input\n"
 		"-O <h>:<p> : output data to host <h> and port <p>\n"
 		"-n <num>   : <num> volumes for input\n"
 		"-T <file>  : as -t but uses <file> as buffer\n"
@@ -665,6 +723,7 @@ void usage(void)
 		"-u <num>   : pause <num> milliseconds after each write\n"
 		"-f         : overwrite existing files\n"
 		"-a <time>  : autoloader which needs <time> seconds to reload\n"
+		"-A <cmd>   : issue command <cmd> to request new volume\n"
 		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"
 		"-q         : quiet - do not display the status on stderr\n"
 		"--md5      : generate md5 hash of transfered data\n"
@@ -689,6 +748,9 @@ unsigned long long calcint(const char **argv, int c, unsigned long long d)
 			return i;
 		case 'M':
 			i <<= 20;
+			return i;
+		case 'G':
+			i <<= 30;
 		case 'b':
 		case 'B':
 			return i;
@@ -798,8 +860,13 @@ int main(int argc, const char **argv)
 			debugmsg("disabling display of status\n");
 			Status = 0;
 		} else if (!argcheck("-a",argv,&c)) {
-			Autoloader = atoi(argv[c]);
-			debugmsg("Autoloader time = %d\n",Autoloader);
+			Autoloader = 1;
+			Autoload_time = atoi(argv[c]);
+			debugmsg("Autoloader time = %d\n",Autoload_time);
+		} else if (!argcheck("-A",argv,&c)) {
+			Autoloader = 1;
+			Autoload_cmd = argv[c];
+			debugmsg("Autoloader command = \"%s\"\n", Autoload_cmd);
 		} else if (!argcheck("-P",argv,&c)) {
 			if (1 != sscanf(argv[c],"%f",&StartWrite))
 				StartWrite = 0;
@@ -832,6 +899,9 @@ int main(int argc, const char **argv)
 #elif defined HAVE_LIBMD5
 			Hash = 1;
 			MD5Init(&md5ctxt);
+#elif defined HAVE_LIBSSL
+			Hash = 1;
+			MD5_Init(&md5ctxt);
 #else
 			warningmsg("md5 hash support has not been compiled in!");
 #endif
@@ -872,10 +942,15 @@ int main(int argc, const char **argv)
 	if ((Multivolume) && (!Infile))
 		fatal("multi volume support for input needs an explicit given input device (option -i)\n");
 
+	/* check that we stay within system limits */
+	if (Numblocks > sysconf(_SC_SEM_VALUE_MAX))
+		fatal("cannot allocate more than %d blocks.\nThis is a system dependent limit, depending on the maximum semaphore value.\nPlease choose a bigger block size.\n",sysconf(_SC_SEM_VALUE_MAX));
+	if (Blocksize * Numblocks > SSIZE_MAX)
+		fatal("cannot address so much memory\n");
 	/* create buffer */
-	Buffer = (char **) malloc(Numblocks * sizeof(char *));
+	Buffer = (char **) valloc(Numblocks * sizeof(char *));
 	if (!Buffer)
-		fatal("Could not allocate enough memory!\n");
+		fatal("Could not allocate enough memory: %s\n",strerror(errno));
 	if (Memmap) {
 		infomsg("mapping temporary file to memory with %llu blocks with %llu byte (%llu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
 		if (!Tmpfile) {
@@ -889,6 +964,7 @@ int main(int argc, const char **argv)
 		}
 		if (-1 == Tmp)
 			fatal("could not create temporary file (%s): %s\n",Tmpfile,strerror(errno));
+		unlink(Tmpfile);
 		/* resize the file. Needed - at least under linux, who knows why? */
 		if (-1 == lseek(Tmp,Numblocks * Blocksize - sizeof(int),SEEK_SET))
 			fatal("could not resize temporary file: %s\n",strerror(errno));
@@ -900,7 +976,9 @@ int main(int argc, const char **argv)
 		debugmsg("temporary file mapped to address %p\n",Buffer[0]);
 	} else {
 		infomsg("allocating memory for %llu blocks with %llu byte (%llu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
-		Buffer[0] = (char *) malloc(Blocksize * Numblocks);
+		Buffer[0] = (char *) valloc(Blocksize * Numblocks);
+		if (Buffer[0] == 0)
+			fatal("Could not allocate enough memory: %s\n",strerror(errno));
 	}
 	for (c = 1; c < Numblocks; c++)
 		Buffer[c] = Buffer[0] + Blocksize * c;
@@ -942,7 +1020,7 @@ int main(int argc, const char **argv)
 		if ((Blocksize < st.st_blksize) || (Blocksize % st.st_blksize != 0)) {
 			warningmsg("Blocksize should be a multiple of the blocksize of the output device!\n"
 				"This can cause problems with some device/OS combinations...\n"
-				"Blocksize on output device is %d (default for tar is 10k)\n",st.st_blksize);
+				"Blocksize on output device is %d (transfer block size is %lld)\n", st.st_blksize, Blocksize);
 			if (setOutsize)
 				fatal("unable to set output blocksize\n");
 		} else {
