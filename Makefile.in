@@ -27,5 +27,6 @@ distclean: clean
 	config.status Makefile mbuffer.1
 
 install:
-	$(INSTALL) $(TARGET) $(bindir)
+	$(INSTALL) -d $(DESTDIR)$(bindir)
+	$(INSTALL) $(TARGET) $(DESTDIR)$(bindir)
 

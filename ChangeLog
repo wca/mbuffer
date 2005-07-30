@@ -1,3 +1,8 @@
+20050730:
+- made mbuffer.c lint clean
+- fixed some types
+- Makefile fix for install
+
 20050726:
 - added support for openssl based md5 hashing
 - support of transfer summary in gigabyte
@@ -8,7 +13,7 @@
   (patch submitted by Wolfgang Denk)
 - enhanced network parameter parsing
 - FIX: transient error in status display
-- FIX: mbuffer could hang on first SIGINTR (chance 1/3)
+- FIX: mbuffer could hang on first SIGINT (chance 1/3)
 - fixed a bug in network client verification code
 - pass CFLAGS also to link phase
 - unlink tmpfile as early as possible
@@ -18,7 +23,7 @@
 - additional sanity checks for buffer limits
 
 20050510:
-- fixed possible lockup upon SIGINTR
+- fixed possible lockup upon SIGINT
 - fixed displayed time
 - updated display to change to MB instead of kB when > 3072kB
 
