@@ -22,8 +22,7 @@
 #elif defined HAVE_LIBMD5
 #include <md5.h>
 #elif defined HAVE_LIBSSL
-#include <md5global.h>
-#include <md5.h>
+#include <openssl/md5.h>
 #endif
 
 /* headers needed for networking */
@@ -38,8 +37,12 @@
 
 static pthread_t Reader, Writer;
 static long Verbose = 3, In = 0, Out = 0, Tmp = 0, Pause = 0, Memmap = 0,
-	Status = 1, Outsize = 10240, Nooverwrite = O_EXCL, Outblocksize = 0,
-	Autoloader = 0, Autoload_time = 0, Hash = 0, Sock = 0;
+	Status = 1, Nooverwrite = O_EXCL, Outblocksize = 0,
+	Autoloader = 0, Autoload_time = 0, Sock = 0;
+static unsigned long Outsize = 10240;
+#if defined HAVE_LIBSSL || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
+static long  Hash = 0;
+#endif
 static volatile int Finish = 0, Terminate = 0;
 static unsigned long long  Rest = 0,Blocksize = 10240, Numblocks = 256;
 static volatile unsigned long long Numin = 0, Numout = 0;
@@ -341,7 +344,8 @@ static void requestInputVolume(void)
 
 static void *inputThread(void *ignored)
 {
-	int err, fill = 0;
+	int err;
+	int fill = 0;
 	unsigned long long num, at = 0;
 	const float startread = StartRead, startwrite = StartWrite;
 
@@ -503,7 +507,8 @@ static void checkIncompleteOutput(void)
 
 static void *outputThread(void *ignored)
 {
-	int at = 0, fill;
+	unsigned at = 0;
+	int fill;
 	const float startwrite = StartWrite, startread = StartRead;
 	unsigned long long blocksize = Blocksize;
 	
@@ -568,9 +573,16 @@ static void *outputThread(void *ignored)
 			sem_getvalue(&Buf2Dev,&fill);
 			if (0 == fill) {
 				infomsg("syncing...\n");
-				while (0 != fsync(Out))
-					if (errno != EINTR)
+				while (0 != fsync(Out)) {
+					if (errno == EINTR) {
+						continue;
+					} else if (errno == EINVAL) {
+						warningmsg("output does not support syncing: omitted.");
+						break;
+					} else {
 						fatal("error syncing: %s\n",strerror(errno));
+					}
+				}
 				infomsg("outputThread: finished - exiting...\n");
 				if (-1 == close(Out))
 					errormsg("error closing output: %s\n",strerror(errno));
@@ -599,12 +611,15 @@ static void openNetworkInput(const char *host, unsigned short port)
 	struct sockaddr_in caddr;
 	socklen_t clen = sizeof(caddr);
 	struct hostent *h = 0, *r = 0;
+	const int reuse_addr = 1;
 
 	debugmsg("openNetworkInput(%s,%hu)\n",host,port);
 	infomsg("creating socket for network input...\n");
 	Sock = socket(AF_INET, SOCK_STREAM, 6);
 	if (0 > Sock)
 		fatal("could not create socket for network input: %s\n",strerror(errno));
+	if (-1 == setsockopt(Sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr)))
+		warningmsg("cannot set socket to reuse address: %s\n",strerror(errno));
 	if (host) {
 		debugmsg("resolving hostname of input interface...\n");
 		if (0 == (h = gethostbyname(host)))
@@ -735,7 +750,9 @@ static void usage(void)
 		"-A <cmd>   : issue command <cmd> to request new volume\n"
 		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"
 		"-q         : quiet - do not display the status on stderr\n"
+#if defined HAVE_LIBSSL || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
 		"--md5      : generate md5 hash of transfered data\n"
+#endif
 		"--version  : print version information\n"
 		"Unsupported buffer options: -t -Z -B\n",
 		Numblocks,Blocksize);
@@ -793,7 +810,9 @@ static int argcheck(const char *opt, const char **argv, int *c)
 int main(int argc, const char **argv)
 {
 	unsigned long long totalmem = 0;
-	int c, err, optMset = 0, optSset = 0, optBset = 0;
+	unsigned u;
+	long mxnrsem;
+	int err, optMset = 0, optSset = 0, optBset = 0, c;
 #ifdef HAVE_ST_BLKSIZE
 	struct stat st;
 	int setOutsize = 0;
@@ -813,7 +832,7 @@ int main(int argc, const char **argv)
 			optMset = 1;
 			debugmsg("totalmem = %llu\n",totalmem);
 		} else if (!argcheck("-b",argv,&c)) {
-			Numblocks = (atoi(argv[c])) ? (atoi(argv[c])) : Numblocks;
+			Numblocks = (atoi(argv[c])) ? ((unsigned long long) atoll(argv[c])) : Numblocks;
 			optBset = 1;
 			debugmsg("Numblocks = %llu\n",Numblocks);
 #ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
@@ -898,19 +917,19 @@ int main(int argc, const char **argv)
 			usage();
 		} else if (!strcmp("--version",argv[c])) {
 			version();
+#if defined HAVE_LIBSSL || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
 		} else if (!strcmp("--md5",argv[c])) {
-#ifdef HAVE_LIBMHASH
 			Hash = 1;
+#endif
+#ifdef HAVE_LIBMHASH
 			MD5hash = mhash_init(MHASH_MD5);
 			if (MHASH_FAILED == MD5hash) {
 				errormsg("error initializing md5 hasing - will not generate hash...");
 				Hash = 0;
 			}
 #elif defined HAVE_LIBMD5
-			Hash = 1;
 			MD5Init(&md5ctxt);
 #elif defined HAVE_LIBSSL
-			Hash = 1;
 			MD5_Init(&md5ctxt);
 #else
 			warningmsg("md5 hash support has not been compiled in!");
@@ -953,8 +972,12 @@ int main(int argc, const char **argv)
 		fatal("multi volume support for input needs an explicit given input device (option -i)\n");
 
 	/* check that we stay within system limits */
-	if (Numblocks > sysconf(_SC_SEM_VALUE_MAX))
-		fatal("cannot allocate more than %d blocks.\nThis is a system dependent limit, depending on the maximum semaphore value.\nPlease choose a bigger block size.\n",sysconf(_SC_SEM_VALUE_MAX));
+	mxnrsem = sysconf(_SC_SEM_VALUE_MAX);
+	if (-1 == mxnrsem) {
+		warningmsg("unable to determine maximum value of semaphores\n");
+	} else if (Numblocks > (unsigned long long) mxnrsem)
+		fatal("cannot allocate more than %d blocks.\nThis is a system dependent limit, depending on the maximum semaphore value.\nPlease choose a bigger block size.\n",mxnrsem);
+
 	if (Blocksize * Numblocks > SSIZE_MAX)
 		fatal("cannot address so much memory\n");
 	/* create buffer */
@@ -991,8 +1014,8 @@ int main(int argc, const char **argv)
 		if (Buffer[0] == 0)
 			fatal("Could not allocate enough memory: %s\n",strerror(errno));
 	}
-	for (c = 1; c < Numblocks; c++)
-		Buffer[c] = Buffer[0] + Blocksize * c;
+	for (u = 1; u < Numblocks; u++)
+		Buffer[u] = Buffer[0] + Blocksize * u;
 
 	debugmsg("creating semaphores...\n");
 	if (0 != sem_init(&Buf2Dev,0,0))

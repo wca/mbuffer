@@ -4,8 +4,10 @@ CFLAGS		= @CFLAGS@ $(DEFS)
 LDFLAGS		= @LDFLAGS@
 LIBS		= @LIBS@
 
+prefix		= @prefix@
 exec_prefix     = @exec_prefix@
 bindir          = @bindir@
+mandir		= @mandir@/man1
 
 RM		= @RM@
 INSTALL		= @INSTALL@
@@ -29,4 +31,4 @@ distclean: clean
 install:
 	$(INSTALL) -d $(DESTDIR)$(bindir)
 	$(INSTALL) $(TARGET) $(DESTDIR)$(bindir)
-
+	$(INSTALL) mbuffer.1 $(DESTDIR)$(mandir)

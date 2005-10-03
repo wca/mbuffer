@@ -1,3 +1,13 @@
+20051003:
+- increased maximum value of number of blocks
+- doku updates
+- openssl build fixes
+- fixed some warnings
+- install man page to correct location
+- reuse networking sockets
+- do not bail out if output does not support syncing
+  (thank you to Wolfgang Denk for some suggestions)
+
 20050730:
 - made mbuffer.c lint clean
 - fixed some types

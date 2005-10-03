@@ -36,14 +36,14 @@ use blocks of \fIsize\fP bytes for buffer (default 10240)
 use a total of \fIsize\fP bytes for buffer (default 2MB)
 .TP 
 \fB\-n\fR <\fInum\fP>
-\fInum\fP volumes in input device (requires use of option -i for input device specification) [currently multi volume support is EXPERIMENTAL]
+\fInum\fP volumes in input device (requires use of option \-i for input device specification) [currently multi volume support is EXPERIMENTAL]
 .TP 
 \fB\-t\fR
 use a memory mapped temporaray file as buffer (use with huge buffers)
 .TP 
 \fB\-T\fR <\fIfile\fP>
 as \-t but use \fIfile\fP instead
-.TP
+.TP 
 \fB\-d\fR
 use blocksize of device for output (needed for some devices, slows output down)
 .TP 
@@ -58,10 +58,10 @@ log messages to \fIfile\fP instead of standard error output
 .TP 
 \fB\-u\fR <\fInum\fP>
 pause \fInum\fP microseconds after each write \- might increase performance on some drives with very low performace (< 1 MB/sec)
-.TP
+.TP 
 \fB\-A\fR <\fIcmd\fP>
 used devices is an autoloader which uses \fIcmd\fP to load the next volume
-.TP
+.TP 
 \fB\-a\fR <\fItime\fP>
 used device is an autoloader which takes \fItime\fP seconds to load a new tape
 .TP 
@@ -96,20 +96,24 @@ mbuffer
 Using mbuffer to do a backup with tar to the default tape device. Options for this example: memory mapped temporary file with a size of 10 Megabytes, start after 80% of the buffer have been filled.
 .LP 
 tar cf \- mydirectory | gzip | mbuffer \-t \-m 10M \-p 80 > $TAPE
-.LP
+.LP 
 Using mbuffer with 3 tapes for input and extracting the contents in the current work directory:
-.LP
-mbuffer -n 3 -i $TAPE | gzip -dc | tar xf -
-.LP
+.LP 
+mbuffer \-n 3 \-i $TAPE | gzip \-dc | tar xf \-
+.LP 
 Using mbuffer to write to multiple tape volumes:
+.LP 
+tar cf \- /usr | mbuffer \-o $TAPE
+.LP 
+Write to multiple tapes and erase every tape before writing:
+.LP 
+tar cf \- /usr | mbuffer \-A "echo next tape; read a < /dev/tty; mt erase $TAPE" \-o $TAPE
 .LP
-tar cf - /usr | mbuffer -o $TAPE
-.LP
-Making a backup via network (EXPERIMENTAL):
-.LP
-\fItape server: \fPmbuffer -I 8000 -o $TAPE
-.LP
-\fIbackup client: \fPtar zcf - /home | mbuffer -O tapeserver:8000
+Making a backup via network:
+.LP 
+\fItape server: \fPmbuffer \-I 8000 \-o $TAPE
+.LP 
+\fIbackup client: \fPtar zcf \- /home | mbuffer \-O tapeserver:8000
 .SH "AUTHORS"
 .LP 
 Thomas Maier\-Komor <software@maier\-komor.de>

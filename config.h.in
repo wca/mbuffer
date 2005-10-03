@@ -14,6 +14,7 @@
    default is libmhash fallback is libmd5 */
 #undef HAVE_LIBMHASH
 #undef HAVE_LIBMD5
+#undef HAVE_LIBSSL
 
 /* Define if you have a working `mmap' system call.  */
 #undef HAVE_MMAP
