@@ -11,11 +11,23 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <string.h>
-#include <sys/time.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <termios.h>
 #include <unistd.h>
+
+#ifdef HAVE_SENDFILE
+#include <sys/sendfile.h>
+/* if this sendfile implementation does not support sending from buffers,
+   disable sendfile support */
+	#ifndef SFV_FD_SELF
+	#ifdef __GNUC__
+	#warning Your sendfile implementation does not seem to support sending from buffers - disabling sendfile support.
+	#endif
+	#undef HAVE_SENDFILE
+	#endif
+#endif
 
 #ifdef HAVE_LIBMHASH
 #include <mhash.h>
@@ -34,6 +46,11 @@
 #include <arpa/inet.h>
 
 
+#ifdef O_LARGEFILE
+#define LARGEFILE O_LARGEFILE
+#else
+#define LARGEFILE 0
+#endif
 
 static pthread_t Reader, Writer;
 static long Verbose = 3, In = 0, Out = 0, Tmp = 0, Pause = 0, Memmap = 0,
@@ -49,7 +66,7 @@ static volatile unsigned long long Numin = 0, Numout = 0;
 static float StartWrite = 0, StartRead = 1;
 static char *Tmpfile = 0, **Buffer;
 static const char *Infile = 0, *Outfile = 0, *Autoload_cmd = 0;
-static int Multivolume = 0;
+static int Multivolume = 0, Memlock = 0, Sendout = 0;
 #ifdef HAVE_LIBMHASH
 static MHASH MD5hash;
 #elif defined HAVE_LIBMD5
@@ -328,7 +345,7 @@ static void requestInputVolume(void)
 			err1 = pthread_mutex_unlock(&TermMut);
 			assert(0 == err1);
 		}
-		if (-1 == (In = open(Infile,O_RDONLY)))
+		if (-1 == (In = open(Infile,O_RDONLY|LARGEFILE)))
 			errormsg("could not reopen input: %s\n",strerror(errno));
 	} while (In == -1);
 	Multivolume--;
@@ -475,7 +492,7 @@ static void requestOutputVolume(void)
 			err = pthread_mutex_unlock(&TermMut);
 			assert(0 == err);
 		}
-		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|O_SYNC,0666)))
+		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|O_SYNC|LARGEFILE,0666)))
 			errormsg("error reopening output file: %s\n",strerror(errno));
 	} while (-1 == Out);
 	infomsg("continuing with next volume\n");
@@ -543,7 +560,14 @@ static void *outputThread(void *ignored)
 		}
 		do {
 			/* use Outsize which could be the blocksize of the device (option -d) */
-			int err = write(Out,Buffer[at] + blocksize - rest, rest > Outsize ? Outsize : rest);
+			int err;
+#ifdef HAVE_SENDFILE
+			if (Sendout) {
+				off_t baddr = (off_t) Buffer[at];
+				err = sendfile(Out,SFV_FD_SELF,&baddr,blocksize);
+			} else
+#endif
+				err = write(Out,Buffer[at] + blocksize - rest, rest > Outsize ? Outsize : rest);
 			debugmsg("outputThread: write(Out, Buffer[%d] + %llu, %d) = %d\t(rest = %d)\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, err, rest);
 			if ((-1 == err) && (Terminal) && ((errno == ENOMEM) || (errno == ENOSPC))) {
 				/* request a new volume - but first check
@@ -732,6 +756,7 @@ static void usage(void)
 		"-b <num>   : use <num> blocks for buffer (default %llu)\n"
 		"-s <size>  : use block of <size> bytes for buffer (default %llu)\n"
 		"-m <size>  : use buffer of a total of <size> bytes\n"
+		"-L         : lock buffer in memory (unusable with file based buffers)\n"
 		"-t         : use memory mapped temporary file (for huge buffer)\n"
 		"-d         : use blocksize of device for output\n"
 		"-P <num>   : start writing after buffer has been filled more than <num>%%\n"
@@ -751,8 +776,10 @@ static void usage(void)
 		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"
 		"-q         : quiet - do not display the status on stderr\n"
 #if defined HAVE_LIBSSL || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
+		"-H\n"
 		"--md5      : generate md5 hash of transfered data\n"
 #endif
+		"-V\n"
 		"--version  : print version information\n"
 		"Unsupported buffer options: -t -Z -B\n",
 		Numblocks,Blocksize);
@@ -778,8 +805,14 @@ static unsigned long long calcint(const char **argv, int c, unsigned long long d
 		case 'G':
 			i <<= 30;
 			return i;
+		case '%':
+			if (i >= 100)
+				fatal("invalid value for percentage (must be < 100)\n");
+			return i;
 		case 'b':
 		case 'B':
+			if (i < 128)
+				fatal("invalid value for number of bytes");
 			return i;
 		default:
 			fatal("unrecognized size charakter '%c' in option\n",c);
@@ -827,9 +860,20 @@ int main(int argc, const char **argv)
 			Blocksize = Outsize = calcint(argv,c,Blocksize);
 			optSset = 1;
 			debugmsg("Blocksize = %llu\n",Blocksize);
+			if (Blocksize < 100)
+				fatal("cannot set blocksize as percentage of total physical memory\n");
 		} else if (!argcheck("-m",argv,&c)) {
 			totalmem = calcint(argv,c,totalmem);
 			optMset = 1;
+			if (totalmem < 100) {
+				long pgsz, nump;
+				pgsz = sysconf(_SC_PAGESIZE);
+				assert(pgsz > 0);
+				nump = sysconf(_SC_PHYS_PAGES);
+				assert(pgsz > 0);
+				debugmsg("total # of phys pages: %li (pagesize %li)\n",nump,pgsz);
+				totalmem = ((unsigned long long) nump * pgsz * totalmem) / 100 ;
+			}
 			debugmsg("totalmem = %llu\n",totalmem);
 		} else if (!argcheck("-b",argv,&c)) {
 			Numblocks = (atoi(argv[c])) ? ((unsigned long long) atoll(argv[c])) : Numblocks;
@@ -858,6 +902,7 @@ int main(int argc, const char **argv)
 			debugmsg("Infile = %s\n",Infile);
 		} else if (!argcheck("-o",argv,&c)) {
 			Outfile = argv[c];
+			Sendout = 1;
 			debugmsg("Outfile = \"%s\"\n",Outfile);
 		} else if (!argcheck("-I",argv,&c)) {
 			getNetVars(argv,&c,&client,&netPortIn);
@@ -865,6 +910,7 @@ int main(int argc, const char **argv)
 		} else if (!argcheck("-O",argv,&c)) {
 			getNetVars(argv,&c,&server,&netPortOut);
 			debugmsg("Output: server = %s, port = %hu\n",server,netPortOut);
+			Sendout = 1;
 		} else if (!argcheck("-T",argv,&c)) {
 			Tmpfile = malloc(strlen(argv[c]) + 1);
 			if (!Tmpfile)
@@ -872,6 +918,10 @@ int main(int argc, const char **argv)
 			(void) strcpy(Tmpfile, argv[c]);
 			Memmap = 1;
 			debugmsg("Tmpfile = %s\n",Tmpfile);
+			if (Memlock) {
+				Memlock = 0;
+				warningmsg("cannot lock file based buffers in memory\n");
+			}
 		} else if (!argcheck("-l",argv,&c)) {
 			Log = fopen(argv[c],"w");
 			if (0 == Log) {
@@ -911,25 +961,28 @@ int main(int argc, const char **argv)
 			if ((StartRead >= 1) || (StartRead < 0))
 				fatal("error in argument -p: must be bigger or equal to 0 and less than 100");
 			debugmsg("StartRead = %1.2f\n",StartRead);
-		} else if (!strcmp("--help",argv[c])) {
+		} else if (!strcmp("-L",argv[c])) {
+			if (Tmpfile == 0)
+				Memlock = 1;
+			else
+				warningmsg("cannot lock file based buffers in memory\n");
+		} else if (!strcmp("--help",argv[c]) || !strcmp("-h",argv[c])) {
 			usage();
-		} else if (!strcmp("-h",argv[c])) {
-			usage();
-		} else if (!strcmp("--version",argv[c])) {
+		} else if (!strcmp("--version",argv[c]) || !strcmp("-V",argv[c])) {
 			version();
-#if defined HAVE_LIBSSL || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
-		} else if (!strcmp("--md5",argv[c])) {
-			Hash = 1;
-#endif
+		} else if (!strcmp("--md5",argv[c]) || !strcmp("-H",argv[c])) {
 #ifdef HAVE_LIBMHASH
+			Hash = 1;
 			MD5hash = mhash_init(MHASH_MD5);
 			if (MHASH_FAILED == MD5hash) {
 				errormsg("error initializing md5 hasing - will not generate hash...");
 				Hash = 0;
 			}
 #elif defined HAVE_LIBMD5
+			Hash = 1;
 			MD5Init(&md5ctxt);
 #elif defined HAVE_LIBSSL
+			Hash = 1;
 			MD5_Init(&md5ctxt);
 #else
 			warningmsg("md5 hash support has not been compiled in!");
@@ -987,12 +1040,18 @@ int main(int argc, const char **argv)
 	if (Memmap) {
 		infomsg("mapping temporary file to memory with %llu blocks with %llu byte (%llu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
 		if (!Tmpfile) {
-			char tfilename[] = "/tmp/mbuffer-XXXXXX";
+			char tmplname[] = "mbuffer-XXXXXX";
+			char *tmpdir = getenv("TMPDIR") ? getenv("TMPDIR") : "/var/tmp";
+			char tfilename[sizeof(tmplname) + strlen(tmpdir) + 1];
+			(void) strcpy(tfilename,tmpdir);
+			(void) strcat(tfilename,"/");
+			(void) strcat(tfilename,tmplname);
 			Tmp = mkstemp(tfilename);
-			Tmpfile = malloc(sizeof(tfilename));
+			Tmpfile = malloc(strlen(tfilename));
 			if (!Tmpfile)
 				fatal("out of memory: %s\n",strerror(errno));
 			(void) strcpy(Tmpfile,tfilename);
+			infomsg("tmpfile is %s\n",Tmpfile);
 		} else {
 			Tmp = open(Tmpfile,O_RDWR|O_CREAT|O_EXCL);
 		}
@@ -1014,8 +1073,20 @@ int main(int argc, const char **argv)
 		if (Buffer[0] == 0)
 			fatal("Could not allocate enough memory: %s\n",strerror(errno));
 	}
-	for (u = 1; u < Numblocks; u++)
+	for (u = 1; u < Numblocks; u++) {
 		Buffer[u] = Buffer[0] + Blocksize * u;
+		*Buffer[u] = 0;	/* touch every block before locking */
+	}
+
+	if (Memlock) {
+		uid_t uid;
+		uid = geteuid();
+		if (0 != seteuid(0))
+			warningmsg("could not change to uid 0 to lock memory (is mbuffer setuid root?)\n");
+		else if ((0 != mlock((char *)Buffer,Numblocks * sizeof(char *))) || (0 != mlock(Buffer[0],Blocksize * Numblocks)))
+			warningmsg("could not lock buffer in memory: %s\n",strerror(errno));
+		seteuid(uid);	/* don't give anyone a chance to attack this program, so giveup uid 0 after locking... */
+	}
 
 	debugmsg("creating semaphores...\n");
 	if (0 != sem_init(&Buf2Dev,0,0))

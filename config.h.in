@@ -35,3 +35,5 @@
 /* Define if `st_blksize' is member of `struct stat'. */
 #undef HAVE_STRUCT_STAT_ST_BLKSIZE
 
+/* Define if you have libsendfile. */
+#undef HAVE_SENDFILE

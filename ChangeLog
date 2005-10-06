@@ -1,3 +1,18 @@
+20051006:
+- added support for sendfile
+  (AFAIK only the Solaris version supports sending from buffers)
+- added memory locking support
+- added support to set buffer size as percentage of physical memory
+- open file with O_LARGEFILE per default
+- added some command-line options for existing functionality
+  (-H, -V)
+- compile as 64bit executable on opteron and sparc architectures by
+  default
+- defaulting to /var/tmp for buffer files, as /tmp is a swap based 
+  filesystem on some operating systems
+- use TMPDIR environment variable if available to determine where
+  to put a buffer file
+
 20051003:
 - increased maximum value of number of blocks
 - doku updates

@@ -6,7 +6,9 @@ mbuffer \- measuring buffer
 mbuffer [\fIoptions\fP]
 .SH "DESCRIPTION"
 .LP 
-mbuffer buffers i/o operations and displays the throughput rate. It is multithreaded and offers more options than the standard buffer.
+mbuffer buffers i/o operations and displays the throughput rate. It is
+multithreaded, supports network connections, and offers more options
+than the standard buffer.
 .SH "OPTIONS"
 .LP 
 .TP 
@@ -21,10 +23,11 @@ with the IP of hostname will be used.
 .TP 
 \fB\-o\fR <\fIfilename\fP>
 use \fIfilename\fP as output instead of the standard output (needs to be
-given for multi volume support)
+given for multi volume support, will enable use of sendfile if available)
 .TP 
 \fB\-O\fR <\fIhostname:port\fP>
-write output to \fIhostname:port\fP instead of the standard output
+write output to \fIhostname:port\fP instead of the standard output (will
+enable use of sendfile if available)
 .TP 
 \fB\-b\fR <\fInum\fP>
 use \fInum\fP blocks for buffer (default 256)
@@ -33,7 +36,13 @@ use \fInum\fP blocks for buffer (default 256)
 use blocks of \fIsize\fP bytes for buffer (default 10240)
 .TP 
 \fB\-m\fR <\fIsize\fP>
-use a total of \fIsize\fP bytes for buffer (default 2MB)
+use a total of \fIsize\fP bytes for buffer (default 2MB) - size can be
+set with a trailing charakter (b and B for Byte, k for kByte, M for
+MByte, G for Gigabyte, and with % for a percentage of total physical 
+memory
+.TP 
+\fB\-L\f
+lock buffer in memory - this option is not available for file-based buffers and requires mbuffer to be setuid root (use with care)
 .TP 
 \fB\-n\fR <\fInum\fP>
 \fInum\fP volumes in input device (requires use of option \-i for input device specification) [currently multi volume support is EXPERIMENTAL]
@@ -74,19 +83,22 @@ set verbose level to \fInum\fP. Valid values are 0..5 (0 = none, 1 = errors, 2 =
 \fB\-q\fR
 quiet \- do not display the status on the standard error output
 .TP 
-\fB\-\-help\fR
+\fB\-h, \-\-help\fR
 Output help information and exit.
 .TP 
-\fB\-\-md5\fR
+\fB\-H, \-\-md5\fR
 Generate md5 hash of transfered data.
 .TP 
-\fB\-\-version\fR
+\fB\-V, \-\-version\fR
 Output version information and exit.
+.SH "ENVIRONMENT VARIABLES"
+If TMPDIR is set, mbuffer allocates storage for file based buffers in this
+directory\&. If TMPDIR is unset \fI/var/tmp\fR will be used\&.
 .SH "FILES"
 .LP 
 \fI/usr/local/bin/mbuffer\fP 
 .br 
-\fI/tmp/mbuffer*\fP 
+\fI/var/tmp/mbuffer-*\fP 
 .SH "EXAMPLES"
 .LP 
 To run this program with the default options just type:
@@ -95,7 +107,7 @@ mbuffer
 .LP 
 Using mbuffer to do a backup with tar to the default tape device. Options for this example: memory mapped temporary file with a size of 10 Megabytes, start after 80% of the buffer have been filled.
 .LP 
-tar cf \- mydirectory | gzip | mbuffer \-t \-m 10M \-p 80 > $TAPE
+tar cf \- mydirectory | gzip | mbuffer \-t \-m 10M \-p 80 \-f \-o $TAPE
 .LP 
 Using mbuffer with 3 tapes for input and extracting the contents in the current work directory:
 .LP 
@@ -103,15 +115,15 @@ mbuffer \-n 3 \-i $TAPE | gzip \-dc | tar xf \-
 .LP 
 Using mbuffer to write to multiple tape volumes:
 .LP 
-tar cf \- /usr | mbuffer \-o $TAPE
+tar cf \- /usr | mbuffer \-f \-o $TAPE
 .LP 
 Write to multiple tapes and erase every tape before writing:
 .LP 
-tar cf \- /usr | mbuffer \-A "echo next tape; read a < /dev/tty; mt erase $TAPE" \-o $TAPE
+tar cf \- /usr | mbuffer \-A "echo next tape; read a < /dev/tty; mt erase $TAPE" \-f \-o $TAPE
 .LP
 Making a backup via network:
 .LP 
-\fItape server: \fPmbuffer \-I 8000 \-o $TAPE
+\fItape server: \fPmbuffer \-I 8000 \-f \-o $TAPE
 .LP 
 \fIbackup client: \fPtar zcf \- /home | mbuffer \-O tapeserver:8000
 .SH "AUTHORS"
