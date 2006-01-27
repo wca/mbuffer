@@ -1,3 +1,8 @@
+20060126:
+- clarified some errormessages
+- fixed some typos
+- updated README file
+
 20051006:
 - added support for sendfile
   (AFAIK only the Solaris version supports sending from buffers)

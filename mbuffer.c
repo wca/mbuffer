@@ -227,15 +227,15 @@ static RETSIGTYPE sigHandler(int signr)
 {
 	switch (signr) {
 	case SIGINT:
-		infomsg("\rcatched INT signal...\n");
+		infomsg("\rcought INT signal...\n");
 		terminate();
 		break;
 	case SIGTERM:
-		infomsg("\rcatched TERM signal...\n");
+		infomsg("\rcought TERM signal...\n");
 		terminate();
 		break;
 	default:
-		debugmsg("\rcatched unexpected signal %d...\n",signr);
+		debugmsg("\rcought unexpected signal %d...\n",signr);
 	}
 }
 
@@ -485,6 +485,12 @@ static void requestOutputVolume(void)
 			int err;
 			err = pthread_mutex_lock(&TermMut);
 			assert(0 == err);
+			if (Terminal == 0) {
+				errormsg("End of volume, but not end of input.\n"
+					"Specify an autoload command, if you are working without terminal.\n");
+				Finish = 1;
+				pthread_exit((void *) -1);
+			}
 			(void) fprintf(Terminal,"\nvolume full - insert new media and press return whe ready...\n");
 			(void) tcflush(fileno(Terminal),TCIFLUSH);
 			(void) fgetc(Terminal);
@@ -741,7 +747,7 @@ static void version(void)
 {
 	(void) fprintf(stderr,
 		"mbuffer version "VERSION"\n"\
-		"Copyright 2001-2005 - T. Maier-Komor\n"\
+		"Copyright 2001-2006 - T. Maier-Komor\n"\
 		"License: GPL2 - see file COPYING\n");
 	exit(0);
 }
@@ -1144,9 +1150,9 @@ int main(int argc, const char **argv)
 
 	debugmsg("accessing terminal...\n");
 	Terminal = fopen("/dev/tty","r+");
-	if (!Terminal) {
-		errormsg("could not open terminal: %s\n",strerror(errno));
-		warningmsg("multi volume support turned off");
+	if ((Terminal == 0) && (Status != 0)) {
+		warningmsg("could not open terminal: %s\n",strerror(errno));
+		warningmsg("disabled manual multivolume support and display of throughput");
 		Status = 0;
 	}
 
