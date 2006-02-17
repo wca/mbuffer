@@ -1,3 +1,9 @@
+20060217:
+- made signal handling more standards conforming
+- use deferred cancellation instead of asynchronous
+- fixed some debug messages
+- use sendfile only for sockets
+
 20060126:
 - clarified some errormessages
 - fixed some typos

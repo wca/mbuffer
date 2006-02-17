@@ -1,3 +1,8 @@
+/*
+ * This file is licensed according to the GPLv2. See file LICENSE for details.
+ * author: Thomas Maier-Komor
+ */
+
 #include "config.h"
 #include <assert.h>
 #include <errno.h>
@@ -11,6 +16,7 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <string.h>
+#include <stropts.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -208,34 +214,15 @@ static void summary(unsigned long long numb, float secs)
 
 
 
-static void terminate(void)
-{
-	infomsg("\rterminating...\n");
-	Terminate = 1;
-	if (pthread_equal(pthread_self(),Reader)) {
-		pthread_cancel(Writer);
-		pthread_cancel(Reader);
-	} else {
-		pthread_cancel(Reader);
-		pthread_cancel(Writer);
-	}
-}
-
-
-
 static RETSIGTYPE sigHandler(int signr)
 {
 	switch (signr) {
 	case SIGINT:
-		infomsg("\rcought INT signal...\n");
-		terminate();
-		break;
 	case SIGTERM:
-		infomsg("\rcought TERM signal...\n");
-		terminate();
+		Terminate = 1;
 		break;
 	default:
-		debugmsg("\rcought unexpected signal %d...\n",signr);
+		(void) raise(SIGABRT);
 	}
 }
 
@@ -247,14 +234,18 @@ static void statusThread(void)
 	float in = 0, out = 0, diff, fill;
 	unsigned long long total, lin = 0, lout = 0;
 	int unwritten = 1;	/* assumption: initially there is at least one unwritten block */
+	int ret;
 
 	(void) gettimeofday(&Starttime,0);
 	last = Starttime;
+#ifdef __alpha
 	(void) usleep(1000);	/* needed on alpha (stderr fails with fpe on nan) */
+#endif
 	while (!(Finish && (unwritten == 0)) && (Terminate == 0)) {
 		int err;
 		char id = 'k', od = 'k', td = 'k';
-		sem_getvalue(&Buf2Dev,&unwritten);
+		err = sem_getvalue(&Buf2Dev,&unwritten);
+		assert(0 == err);
 		fill = (float)unwritten / (float)Numblocks * 100.0;
 		(void) gettimeofday(&now,0);
 		diff = now.tv_sec - last.tv_sec + (float) now.tv_usec / 1000000 - (float) last.tv_usec / 1000000;
@@ -291,10 +282,17 @@ static void statusThread(void)
 		assert(0 == err);
 		(void) usleep(500000);
 	}
+	if (Terminate) {
+		infomsg("\rterminating...\n");
+		(void) pthread_cancel(Writer);
+		(void) pthread_cancel(Reader);
+	}
 	(void) fprintf(Terminal,"\n");
 	infomsg("statusThread: joining to terminate...\n");
-	pthread_join(Reader,0);
-	pthread_join(Writer,0);
+	ret = pthread_join(Reader,0);
+	assert(0 == ret);
+	ret = pthread_join(Writer,0);
+	assert(0 == ret);
 	if (Memmap) {
 		int ret = munmap(Buffer[0],Blocksize*Numblocks);
 		assert(ret == 0);
@@ -368,7 +366,6 @@ static void *inputThread(void *ignored)
 
 	assert(ignored == 0);
 	infomsg("inputThread: starting...\n");
-	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS,0);
 	for (;;) {
 		if ((startread < 1) && (fill == Numblocks - 1)) {
 			debugmsg("inputThread: buffer full, waiting for it to drain.\n");
@@ -376,7 +373,7 @@ static void *inputThread(void *ignored)
 		}
 		debugmsg("inputThread: sem_wait\n");
 		sem_wait(&Dev2Buf); /* Wait for one or more buffer blocks to be free */
-		if (Terminate) {	// for async termination requests
+		if (Terminate) {	/* for async termination requests */
 			
 			debugmsg("inputThread: terminating upon termination request...\n");
 			if (-1 == close(In))
@@ -387,7 +384,7 @@ static void *inputThread(void *ignored)
 		num = 0;
 		do {
 			err = read(In,Buffer[at] + num,Blocksize - num);
-			debugmsg("inputThread: read(In, Buffer[%d] + %d, %llu) = %d\n", at, num, Blocksize - num, err);
+			debugmsg("inputThread: read(In, Buffer[%llu] + %llu, %llu) = %d\n", at, num, Blocksize - num, err);
 			if ((!err) && (Terminal) && (Multivolume)) {
 				requestInputVolume();
 			} else if (-1 == err) {
@@ -537,7 +534,6 @@ static void *outputThread(void *ignored)
 	
 	assert(ignored == 0);
 	infomsg("\noutputThread: starting...\n");
-	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS,0);
 	for (;;) {
 		unsigned long long rest = blocksize;
 		debugmsg("outputThread: sem_wait\n");
@@ -569,12 +565,19 @@ static void *outputThread(void *ignored)
 			int err;
 #ifdef HAVE_SENDFILE
 			if (Sendout) {
-				off_t baddr = (off_t) Buffer[at];
-				err = sendfile(Out,SFV_FD_SELF,&baddr,blocksize);
+				off_t baddr = (off_t) Buffer[at] + blocksize - rest;
+				err = sendfile(Out,SFV_FD_SELF,&baddr,rest > Outsize ? Outsize : rest);
+#ifdef DEBUG
+				debugmsg("outputThread: sendfile(Out, SFV_FD_SELF, Buffer[%d] + %llu, %llu) = %d\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, err);
+#endif
 			} else
 #endif
+			{
 				err = write(Out,Buffer[at] + blocksize - rest, rest > Outsize ? Outsize : rest);
-			debugmsg("outputThread: write(Out, Buffer[%d] + %llu, %d) = %d\t(rest = %d)\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, err, rest);
+#ifdef DEBUG
+				debugmsg("outputThread: write(Out, Buffer[%d] + %llu, %d) = %d\t(rest = %d)\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, err, rest);
+#endif
+			}
 			if ((-1 == err) && (Terminal) && ((errno == ENOMEM) || (errno == ENOSPC))) {
 				/* request a new volume - but first check
 				 * wheather we are really at the
@@ -583,10 +586,7 @@ static void *outputThread(void *ignored)
 				continue;
 			} else if (-1 == err) {
 				errormsg("outputThread: error writing: %s\n",strerror(errno));
-#ifdef DEBUG
-				errormsg("outputThread debug info: write(Out, Buffer[%d] + %llu, %d) = %d\t(rest = %d)\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, err, rest);
-#endif
-				Finish = 1;
+				Terminate = 1;
 				sem_post(&Dev2Buf);
 				pthread_exit((void *) -1);
 			}
@@ -908,7 +908,6 @@ int main(int argc, const char **argv)
 			debugmsg("Infile = %s\n",Infile);
 		} else if (!argcheck("-o",argv,&c)) {
 			Outfile = argv[c];
-			Sendout = 1;
 			debugmsg("Outfile = \"%s\"\n",Outfile);
 		} else if (!argcheck("-I",argv,&c)) {
 			getNetVars(argv,&c,&client,&netPortIn);
@@ -1091,7 +1090,8 @@ int main(int argc, const char **argv)
 			warningmsg("could not change to uid 0 to lock memory (is mbuffer setuid root?)\n");
 		else if ((0 != mlock((char *)Buffer,Numblocks * sizeof(char *))) || (0 != mlock(Buffer[0],Blocksize * Numblocks)))
 			warningmsg("could not lock buffer in memory: %s\n",strerror(errno));
-		seteuid(uid);	/* don't give anyone a chance to attack this program, so giveup uid 0 after locking... */
+		err = seteuid(uid);	/* don't give anyone a chance to attack this program, so giveup uid 0 after locking... */
+		assert(err == 0);
 	}
 
 	debugmsg("creating semaphores...\n");
@@ -1170,8 +1170,8 @@ int main(int argc, const char **argv)
 	if (Status)
 		statusThread();
 	else {
-		pthread_join(Reader,0);
-		pthread_join(Writer,0);
+		(void) pthread_join(Reader,0);
+		(void) pthread_join(Writer,0);
 	}
 	return 0;
 }
