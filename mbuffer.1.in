@@ -77,6 +77,14 @@ used device is an autoloader which takes \fItime\fP seconds to load a new tape
 \fB\-f\fR
 overwrite output file if it exists already
 .TP 
+\fB\-c\fR
+write with synchronous data integrity support - This option forces all
+writes to complete before continuing. This enables errors to be reported
+earlier and more precisely, but might decrease performance. Especially
+systems with high level of data integrity support suffer a huge
+performance hit. Others might seem to be unaffected, but just neglect
+support for full synchronous data integrity.
+.TP 
 \fB\-v\fR <\fInum\fP>
 set verbose level to \fInum\fP. Valid values are 0..5 (0 = none, 1 = errors, 2 = warnings, 4 = informations, 5 = debugging informations). Higher values include lower values messages.
 .TP 

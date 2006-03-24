@@ -43,6 +43,14 @@
 #include <openssl/md5.h>
 #endif
 
+#ifndef _POSIX_THREADS
+#error posix threads are required
+#endif
+
+#ifndef _POSIX_SEMAPHORES
+#error posix sempahores are required
+#endif
+
 /* headers needed for networking */
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -61,7 +69,7 @@
 static pthread_t Reader, Writer;
 static long Verbose = 3, In = 0, Out = 0, Tmp = 0, Pause = 0, Memmap = 0,
 	Status = 1, Nooverwrite = O_EXCL, Outblocksize = 0,
-	Autoloader = 0, Autoload_time = 0, Sock = 0;
+	Autoloader = 0, Autoload_time = 0, Sock = 0, OptSync = 0;
 static unsigned long Outsize = 10240;
 #if defined HAVE_LIBSSL || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
 static long  Hash = 0;
@@ -80,8 +88,8 @@ static MD5_CTX md5ctxt;
 #elif defined HAVE_LIBSSL
 static MD5_CTX md5ctxt;
 #endif
-static sem_t Dev2Buf,Buf2Dev,PercentageHigh,PercentageLow;
-static pthread_mutex_t TermMut;
+static sem_t Dev2Buf, Buf2Dev, PercentageLow, PercentageHigh;
+static pthread_mutex_t TermMut = PTHREAD_MUTEX_INITIALIZER;
 static FILE *Log = 0, *Terminal = 0;
 static struct timeval Starttime;
 
@@ -388,7 +396,7 @@ static void *inputThread(void *ignored)
 			if ((!err) && (Terminal) && (Multivolume)) {
 				requestInputVolume();
 			} else if (-1 == err) {
-				errormsg("inputThread: error reading: %s\n",strerror(errno));
+				errormsg("inputThread: error reading at offset %llx: %s\n",Numin*Blocksize,strerror(errno));
 				if (num) {
 					Rest = num;
 					sem_post(&Buf2Dev);
@@ -495,8 +503,12 @@ static void requestOutputVolume(void)
 			err = pthread_mutex_unlock(&TermMut);
 			assert(0 == err);
 		}
-		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|O_SYNC|LARGEFILE,0666)))
+		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|OptSync|LARGEFILE,0666)))
 			errormsg("error reopening output file: %s\n",strerror(errno));
+#ifdef __sun
+		else if (-1 == directio(Out,DIRECTIO_ON))
+			debugmsg("direct I/O hinting failed: %s\n",strerror(errno));
+#endif
 	} while (-1 == Out);
 	infomsg("continuing with next volume\n");
 }
@@ -585,7 +597,7 @@ static void *outputThread(void *ignored)
 				checkIncompleteOutput();
 				continue;
 			} else if (-1 == err) {
-				errormsg("outputThread: error writing: %s\n",strerror(errno));
+				errormsg("outputThread: error writing at offset %llx: %s\n",Blocksize*Numout+blocksize-rest,strerror(errno));
 				Terminate = 1;
 				sem_post(&Dev2Buf);
 				pthread_exit((void *) -1);
@@ -602,7 +614,7 @@ static void *outputThread(void *ignored)
 		if (Finish) {
 			sem_getvalue(&Buf2Dev,&fill);
 			if (0 == fill) {
-				infomsg("syncing...\n");
+				infomsg("outputThread: syncing...\n");
 				while (0 != fsync(Out)) {
 					if (errno == EINTR) {
 						continue;
@@ -762,8 +774,9 @@ static void usage(void)
 		"-b <num>   : use <num> blocks for buffer (default %llu)\n"
 		"-s <size>  : use block of <size> bytes for buffer (default %llu)\n"
 		"-m <size>  : use buffer of a total of <size> bytes\n"
+#ifdef _POSIX_MEMLOCK
 		"-L         : lock buffer in memory (unusable with file based buffers)\n"
-		"-t         : use memory mapped temporary file (for huge buffer)\n"
+#endif
 		"-d         : use blocksize of device for output\n"
 		"-P <num>   : start writing after buffer has been filled more than <num>%%\n"
 		"-p <num>   : start reading after buffer has been filled less than <num>%%\n"
@@ -773,6 +786,7 @@ static void usage(void)
 		"-I <p>     : use network port <port> as input\n"
 		"-O <h>:<p> : output data to host <h> and port <p>\n"
 		"-n <num>   : <num> volumes for input\n"
+		"-t         : use memory mapped temporary file (for huge buffer)\n"
 		"-T <file>  : as -t but uses <file> as buffer\n"
 		"-l <file>  : use <file> for logging messages\n"
 		"-u <num>   : pause <num> milliseconds after each write\n"
@@ -781,6 +795,7 @@ static void usage(void)
 		"-A <cmd>   : issue command <cmd> to request new volume\n"
 		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"
 		"-q         : quiet - do not display the status on stderr\n"
+		"-c         : write with synchronous data integrity support\n"
 #if defined HAVE_LIBSSL || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
 		"-H\n"
 		"--md5      : generate md5 hash of transfered data\n"
@@ -927,6 +942,9 @@ int main(int argc, const char **argv)
 				Memlock = 0;
 				warningmsg("cannot lock file based buffers in memory\n");
 			}
+		} else if (!strcmp("-t",argv[c])) {
+			Memmap = 1;
+			debugmsg("mm = 1\n");
 		} else if (!argcheck("-l",argv,&c)) {
 			Log = fopen(argv[c],"w");
 			if (0 == Log) {
@@ -934,15 +952,15 @@ int main(int argc, const char **argv)
 				errormsg("error opening log file: %s\n",strerror(errno));
 			}
 			debugmsg("logFile set to %s\n",argv[c]);
-		} else if (!strcmp("-t",argv[c])) {
-			Memmap = 1;
-			debugmsg("mm = 1\n");
 		} else if (!strcmp("-f",argv[c])) {
 			Nooverwrite = 0;
 			debugmsg("Nooverwrite = 0\n");
 		} else if (!strcmp("-q",argv[c])) {
 			debugmsg("disabling display of status\n");
 			Status = 0;
+		} else if (!strcmp("-c",argv[c])) {
+			debugmsg("enabling full synchronous I/O\n");
+			OptSync = O_DSYNC;
 		} else if (!argcheck("-a",argv,&c)) {
 			Autoloader = 1;
 			Autoload_time = atoi(argv[c]);
@@ -966,11 +984,13 @@ int main(int argc, const char **argv)
 			if ((StartRead >= 1) || (StartRead < 0))
 				fatal("error in argument -p: must be bigger or equal to 0 and less than 100");
 			debugmsg("StartRead = %1.2f\n",StartRead);
+#ifdef _POSIX_MEMLOCK
 		} else if (!strcmp("-L",argv[c])) {
 			if (Tmpfile == 0)
 				Memlock = 1;
 			else
 				warningmsg("cannot lock file based buffers in memory\n");
+#endif
 		} else if (!strcmp("--help",argv[c]) || !strcmp("-h",argv[c])) {
 			usage();
 		} else if (!strcmp("--version",argv[c]) || !strcmp("-V",argv[c])) {
@@ -1037,7 +1057,7 @@ int main(int argc, const char **argv)
 		fatal("cannot allocate more than %d blocks.\nThis is a system dependent limit, depending on the maximum semaphore value.\nPlease choose a bigger block size.\n",mxnrsem);
 
 	if (Blocksize * Numblocks > SSIZE_MAX)
-		fatal("cannot address so much memory\n");
+		fatal("Cannot address so much memory (%lld*%lld=%lld>%lld).\n",Blocksize,Numblocks, Blocksize*Numblocks,SSIZE_MAX);
 	/* create buffer */
 	Buffer = (char **) valloc(Numblocks * sizeof(char *));
 	if (!Buffer)
@@ -1083,6 +1103,7 @@ int main(int argc, const char **argv)
 		*Buffer[u] = 0;	/* touch every block before locking */
 	}
 
+#ifdef _POSIX_MEMLOCK
 	if (Memlock) {
 		uid_t uid;
 		uid = geteuid();
@@ -1093,6 +1114,7 @@ int main(int argc, const char **argv)
 		err = seteuid(uid);	/* don't give anyone a chance to attack this program, so giveup uid 0 after locking... */
 		assert(err == 0);
 	}
+#endif
 
 	debugmsg("creating semaphores...\n");
 	if (0 != sem_init(&Buf2Dev,0,0))
@@ -1103,8 +1125,6 @@ int main(int argc, const char **argv)
 		fatal("Error creating semaphore PercentageHigh: %s\n",strerror(errno));
 	if (0 != sem_init(&PercentageLow,0,0))
 		fatal("Error creating semaphore PercentageLow: %s\n",strerror(errno));
-	if (0 != pthread_mutex_init(&TermMut,0))
-		fatal("Error creating mutex for Terminal: %s\n",strerror(errno));
 
 	debugmsg("opening streams...\n");
 	if (Infile) {
@@ -1115,8 +1135,12 @@ int main(int argc, const char **argv)
 	} else
 		In = fileno(stdin);
 	if (Outfile) {
-		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|O_SYNC,0666)))
+		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|OptSync,0666)))
 			fatal("could not open output file: %s\n",strerror(errno));
+#ifdef __sun
+		else if (-1 == directio(Out,DIRECTIO_ON))
+			debugmsg("direct I/O hinting failed: %s\n",strerror(errno));
+#endif
 	} else if (netPortOut) {
 		openNetworkOutput(server,netPortOut);
 	} else

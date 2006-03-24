@@ -1,3 +1,19 @@
+20060324:
+- added option -c to enable synchronous data integrity I/O:
+  This was enabled by default until now, but may cause a decrease in
+  performance as it requires a higher number of I/O ops. On systems
+  without full synchronous data integrity support, no difference will
+  be observable concerning performance. Systems that support it, will
+  gain increased performace without -c, but error reporting will be 
+  more precise with -c.
+- changed errormessages to include offset
+- added support for Solaris' directio hinting
+- made memlock support an automagic option (compiled in if available)
+- simplify CFLAGS overriding
+- more portable largefile support solution
+- minimized configure script
+- default to native compiler instead of gcc
+
 20060217:
 - made signal handling more standards conforming
 - use deferred cancellation instead of asynchronous

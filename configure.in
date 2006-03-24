@@ -4,7 +4,7 @@ AC_CONFIG_HEADER(config.h)
 AC_CANONICAL_SYSTEM
 
 PACKAGE=mbuffer
-VERSION=20060217
+VERSION=20060324
 
 AC_PREFIX_DEFAULT(/usr/local)
 test "$prefix" = NONE && prefix=/usr/local
@@ -12,42 +12,17 @@ test "$exec_prefix" = NONE && exec_prefix=$prefix
 
 
 AC_LANG_C
-AC_PROG_CC
+AC_PROG_CC(cc gcc)
 AC_PROG_INSTALL
-
 AC_PATH_PROG(RM,rm)
-AC_PATH_PROG(STRIP,strip)
-AC_PATH_PROG(LN,ln)
+
 
 AC_CHECK_LIB(pthread,pthread_attr_init,,AC_MSG_ERROR(you need the pthread library!))
 AC_SEARCH_LIBS(sem_init,rt posix,,AC_MSG_ERROR(could not find semaphore functions!))
 AC_PATH_PROG(MT,mt,AC_MSG_WARN(could not find the program mt - you might need this if you want autoloader support))
 
-if test -n "$GCC"; then
-        CFLAGS="$CFLAGS -Wall"
-        case `uname -m` in
-                i586)
-                CFLAGS="$CFLAGS -march=pentium"
-                ;;
-                i686)
-                CFLAGS="$CFLAGS -march=pentiumpro"
-                ;;
-		x86_64)
-		CFLAGS="$CFLAGS -march=opteron -m64"
-		;;
-		sun4u)
-		CFLAGS="$CFLAGS -mv8plus -m64"
-		;;
-        esac
-fi
-
 AC_TYPE_SIGNAL
-AC_FUNC_MMAP
-AC_HEADER_TIME
-AC_HEADER_STDC
-AC_CHECK_FUNCS(strerror memcpy)
-AC_CHECK_HEADERS(unistd.h memory.h)
-AC_STRUCT_ST_BLKSIZE
+AC_SYS_LARGEFILE
 AC_SEARCH_LIBS(socket,socket,,AC_MSG_ERROR(could not find the library containing network functions!))
 AC_SEARCH_LIBS(gethostbyname,nsl,,AC_MSG_ERROR(could not find the library containing name convertion functions!))
 AC_SEARCH_LIBS(hstrerror,resolv,,AC_MSG_ERROR(could not find the library containing hstrerror))
@@ -77,6 +52,17 @@ if test x$enable_md5 != xno ; then
 			fi
 	)))
 fi
+
+
+if test -n "$GCC"; then
+        CFLAGS="$CFLAGS -Wall"
+        case `uname -m` in
+                x86_64|sun4u)
+                CFLAGS="$CFLAGS -m64"
+                ;;
+        esac
+fi
+
 
 AC_SUBST(DEBUG)
 AC_DEFINE_UNQUOTED(PACKAGE,"${PACKAGE}")
