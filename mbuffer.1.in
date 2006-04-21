@@ -140,4 +140,4 @@ Thomas Maier\-Komor <software@maier\-komor.de>
 
 .SH "SEE ALSO"
 .LP 
-buffer(1)
+buffer(1), gpl(7)

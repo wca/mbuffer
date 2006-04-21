@@ -75,7 +75,8 @@ static unsigned long Outsize = 10240;
 static long  Hash = 0;
 #endif
 static volatile int Finish = 0, Terminate = 0;
-static unsigned long long  Rest = 0,Blocksize = 10240, Numblocks = 256;
+static unsigned long long  Rest = 0, Blocksize = 10240, Numblocks = 256,
+	ErrorOccured = 0;
 static volatile unsigned long long Numin = 0, Numout = 0;
 static float StartWrite = 0, StartRead = 1;
 static char *Tmpfile = 0, **Buffer;
@@ -131,6 +132,7 @@ static void warningmsg(const char *msg, ...)
 
 static void errormsg(const char *msg, ...)
 {
+	ErrorOccured = 1;
 	if (Verbose >= 2) {
 		va_list val;
 		va_start(val,msg);
@@ -150,7 +152,7 @@ static void fatal(const char *msg, ...)
 		(void) vfprintf(Log,msg,val);
 		va_end(val);
 	}
-	exit(1);
+	exit(EXIT_FAILURE);
 }
 
 
@@ -309,7 +311,9 @@ static void statusThread(void)
 	(void) gettimeofday(&now,0);
 	diff = now.tv_sec - Starttime.tv_sec + (float) now.tv_usec / 1000000 - (float) Starttime.tv_usec / 1000000;
 	summary(Numout * Blocksize + Rest, diff);
-	exit(0);
+	if (ErrorOccured)
+		exit(EXIT_FAILURE);
+	exit(EXIT_SUCCESS);
 }
 
 
@@ -414,7 +418,7 @@ static void *inputThread(void *ignored)
 					mhash(MD5hash,Buffer[at],num);
 				#elif defined HAVE_LIBMD5
 				if (Hash)
-					MD5Update(&md5ctxt,Buffer[at],num);
+					MD5Update(&md5ctxt,(unsigned char *)Buffer[at],num);
 				#elif defined HAVE_LIBSSL
 				if (Hash)
 					MD5_Update(&md5ctxt,Buffer[at],num);
@@ -432,7 +436,7 @@ static void *inputThread(void *ignored)
 			mhash(MD5hash,Buffer[at],Blocksize);
 		#elif defined HAVE_LIBMD5
 		if (Hash)
-			MD5Update(&md5ctxt,Buffer[at],num);
+			MD5Update(&md5ctxt,(unsigned char *)Buffer[at],num);
 		#elif defined HAVE_LIBSSL
 		if (Hash)
 			MD5_Update(&md5ctxt,Buffer[at],num);
@@ -761,7 +765,7 @@ static void version(void)
 		"mbuffer version "VERSION"\n"\
 		"Copyright 2001-2006 - T. Maier-Komor\n"\
 		"License: GPL2 - see file COPYING\n");
-	exit(0);
+	exit(EXIT_SUCCESS);
 }
 
 
@@ -804,7 +808,7 @@ static void usage(void)
 		"--version  : print version information\n"
 		"Unsupported buffer options: -t -Z -B\n",
 		Numblocks,Blocksize);
-	exit(0);
+	exit(EXIT_SUCCESS);
 }
 
 
