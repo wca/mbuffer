@@ -26,7 +26,7 @@ clean:
 
 distclean: clean
 	-$(RM) $(TARGET) config.h config.log \
-	config.status Makefile mbuffer.1
+	config.status Makefile mbuffer.1 core
 
 install:
 	$(INSTALL) -d $(DESTDIR)$(bindir)

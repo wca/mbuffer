@@ -69,16 +69,17 @@
 static pthread_t Reader, Writer;
 static long Verbose = 3, In = 0, Out = 0, Tmp = 0, Pause = 0, Memmap = 0,
 	Status = 1, Nooverwrite = O_EXCL, Outblocksize = 0,
-	Autoloader = 0, Autoload_time = 0, Sock = 0, OptSync = 0;
+	Autoloader = 0, Autoload_time = 0, Sock = 0, OptSync = 0,
+	ErrorOccured = 0;
 static unsigned long Outsize = 10240;
 #if defined HAVE_LIBSSL || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
 static long  Hash = 0;
 #endif
 static volatile int Finish = 0, Terminate = 0;
 static unsigned long long  Rest = 0, Blocksize = 10240, Numblocks = 256,
-	ErrorOccured = 0;
+	MaxReadSpeed = 0, MaxWriteSpeed = 0;
 static volatile unsigned long long Numin = 0, Numout = 0;
-static float StartWrite = 0, StartRead = 1;
+static double StartWrite = 0, StartRead = 1;
 static char *Tmpfile = 0, **Buffer;
 static const char *Infile = 0, *Outfile = 0, *Autoload_cmd = 0;
 static int Multivolume = 0, Memlock = 0, Sendout = 0;
@@ -157,7 +158,7 @@ static void fatal(const char *msg, ...)
 
 
 
-static void summary(unsigned long long numb, float secs)
+static void summary(unsigned long long numb, double secs)
 {
 	int h = (int) secs/3600, m = (int) (secs - h * 3600)/60;
 	double av = (double)numb/secs;
@@ -167,11 +168,11 @@ static void summary(unsigned long long numb, float secs)
 	if (numb < 1331ULL)			/* 1.3 kB */
 		(void) fprintf(Terminal,"%llu Byte in ",numb);
 	else if (numb < 1363149ULL)		/* 1.3 MB */
-		(void) fprintf(Terminal,"%.1f kB in ",(float)numb / 1024);
+		(void) fprintf(Terminal,"%.1f kB in ",(double)numb / 1024);
 	else if (numb < 1395864371ULL)		/* 1.3 GB */
-		(void) fprintf(Terminal,"%.1f MB in ",(float)numb / (float)(1<<20));
+		(void) fprintf(Terminal,"%.1f MB in ",(double)numb / (double)(1<<20));
 	else
-		(void) fprintf(Terminal,"%.1f GB in ",(float)numb / (1<<30));
+		(void) fprintf(Terminal,"%.1f GB in ",(double)numb / (1<<30));
 	if (h)
 		(void) fprintf(Terminal,"%d h ",h);
 	if (m)
@@ -241,7 +242,7 @@ static RETSIGTYPE sigHandler(int signr)
 static void statusThread(void) 
 {
 	struct timeval last, now;
-	float in = 0, out = 0, diff, fill;
+	double in = 0, out = 0, diff, fill;
 	unsigned long long total, lin = 0, lout = 0;
 	int unwritten = 1;	/* assumption: initially there is at least one unwritten block */
 	int ret;
@@ -256,9 +257,9 @@ static void statusThread(void)
 		char id = 'k', od = 'k', td = 'k';
 		err = sem_getvalue(&Buf2Dev,&unwritten);
 		assert(0 == err);
-		fill = (float)unwritten / (float)Numblocks * 100.0;
+		fill = (double)unwritten / (double)Numblocks * 100.0;
 		(void) gettimeofday(&now,0);
-		diff = now.tv_sec - last.tv_sec + (float) now.tv_usec / 1000000 - (float) last.tv_usec / 1000000;
+		diff = now.tv_sec - last.tv_sec + (double) now.tv_usec / 1000000 - (double) last.tv_usec / 1000000;
 		in = ((Numin - lin) * Blocksize) >> 10;
 		in /= diff;
 		if (in > 3 * 1024) {
@@ -309,13 +310,86 @@ static void statusThread(void)
 	}
 	(void) close(Tmp);
 	(void) gettimeofday(&now,0);
-	diff = now.tv_sec - Starttime.tv_sec + (float) now.tv_usec / 1000000 - (float) Starttime.tv_usec / 1000000;
+	diff = now.tv_sec - Starttime.tv_sec + (double) now.tv_usec / 1000000 - (double) Starttime.tv_usec / 1000000;
 	summary(Numout * Blocksize + Rest, diff);
 	if (ErrorOccured)
 		exit(EXIT_FAILURE);
 	exit(EXIT_SUCCESS);
 }
 
+
+static long long timediff(struct timeval *t1, struct timeval *t2)
+{
+	long long tdiff;
+	tdiff = (t1->tv_sec - t2->tv_sec) * 1000000;
+	tdiff += t1->tv_usec - t2->tv_usec;
+	return tdiff;
+}
+
+
+static unsigned long long enforceSpeedLimit(unsigned long long limit, unsigned long long num, struct timeval *last)
+{
+	static long long minwtime = 0;
+	struct timeval now;
+	long long tdiff;
+	double dt;
+	
+	if (minwtime == 0)
+		minwtime = 1000000 / sysconf(_SC_CLK_TCK);
+	(void) gettimeofday(&now,0);
+	tdiff = timediff(&now,last);
+	if (tdiff < 0)
+		return num;
+	if (tdiff > minwtime*5) {
+		(void) gettimeofday(last,0);
+		return num;
+	}
+	dt = (double)tdiff / 1E6;
+	num += Blocksize;
+	if ((num/dt) > (double)limit) {
+		double req = (double)num/limit - dt;
+		long long w = (long long) (req * 1E6);
+		/*
+		 * The following threshold is a heuristic value.
+		 * By experimenting, I found out that using the minimum wait time
+		 * causes a jitter that cannot be adjusted cleanly and results in
+		 * a higher transfer rate than requested for transfers of some MB/s.
+		 * With a limit of 20-30MB/s this issue disappears.
+		 * 
+		 * By using a threshold of 8*minwtime the speed limit is held much 
+		 * better for 2 MB/s. For very low limits i.e. < 200k/s this high 
+		 * threshold is contraproductive. If you really want to use so low
+		 * limits, please change "8 * minwtime" to "minwtime".
+		 *
+		 * Feel free to send me feedback concerning this threshold or an
+		 * alternative algorithm that gets it right for any value.
+		 */
+		if (w > 8 * minwtime) {
+			long long slept, stime;
+			stime = w / minwtime;
+			stime *= minwtime;
+			debugmsg("enforceSpeedLimit(): sleeping for %lld usec\n",stime);
+			(void) usleep(stime);
+			(void) gettimeofday(last,0);
+			slept = timediff(last,&now);
+			debugmsg("enforceSpeedLimit(): slept for %lld usec\n",slept);
+			slept -= stime;
+			last->tv_usec -= slept / 1000000;
+			last->tv_usec -= (slept % 1000000);
+			if (last->tv_usec < 0) {
+				--last->tv_sec;
+				last->tv_usec += 1000000;
+			}
+			return 0;
+		} /* else {
+			Sleeping now would cause a slowdown. So we defer this
+			sleep until the next block has been transferred. Like
+			this we can stay as close to the speed limit as possible.
+			}
+		*/
+	}
+	return num;
+}
 
 
 static void requestInputVolume(void)
@@ -373,9 +447,11 @@ static void *inputThread(void *ignored)
 {
 	int err;
 	int fill = 0;
-	unsigned long long num, at = 0;
-	const float startread = StartRead, startwrite = StartWrite;
+	unsigned long long num, at = 0, xfer = 0;
+	const double startread = StartRead, startwrite = StartWrite;
+	struct timeval last;
 
+	(void) gettimeofday(&last,0);
 	assert(ignored == 0);
 	infomsg("inputThread: starting...\n");
 	for (;;) {
@@ -442,8 +518,10 @@ static void *inputThread(void *ignored)
 			MD5_Update(&md5ctxt,Buffer[at],num);
 		#endif
 		sem_post(&Buf2Dev);
+		if (MaxReadSpeed)
+			xfer = enforceSpeedLimit(MaxReadSpeed,xfer,&last);
 		sem_getvalue(&Buf2Dev,&fill);
-		if (((float) fill / (float) Numblocks) >= startwrite) {
+		if (((double) fill / (double) Numblocks) >= startwrite) {
 			int perc;
 			sem_getvalue(&PercentageHigh,&perc);
 			if (!perc) {
@@ -545,9 +623,12 @@ static void *outputThread(void *ignored)
 {
 	unsigned at = 0;
 	int fill;
-	const float startwrite = StartWrite, startread = StartRead;
-	unsigned long long blocksize = Blocksize;
-	
+	const double startwrite = StartWrite, startread = StartRead;
+	unsigned long long blocksize = Blocksize, num = 0;
+	struct timeval last;
+
+	/* initialize last to 0, because we don't want to wait initially */
+	(void) gettimeofday(&last,0);
 	assert(ignored == 0);
 	infomsg("\noutputThread: starting...\n");
 	for (;;) {
@@ -607,6 +688,9 @@ static void *outputThread(void *ignored)
 				pthread_exit((void *) -1);
 			}
 			rest -= err;
+			if (MaxWriteSpeed) {
+				num = enforceSpeedLimit(MaxWriteSpeed,num,&last);
+			}
 			if (Pause)
 				(void) usleep(Pause);
 		} while (rest > 0);
@@ -637,7 +721,7 @@ static void *outputThread(void *ignored)
 			}
 		}
 		sem_getvalue(&Buf2Dev,&fill);
-		if ((startread < 1) && ((float)fill / (float)Numblocks) < startread) {
+		if ((startread < 1) && ((double)fill / (double)Numblocks) < startread) {
 			int perc;
 			sem_getvalue(&PercentageLow,&perc);
 			if (!perc) {
@@ -781,7 +865,9 @@ static void usage(void)
 #ifdef _POSIX_MEMLOCK
 		"-L         : lock buffer in memory (unusable with file based buffers)\n"
 #endif
+#ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 		"-d         : use blocksize of device for output\n"
+#endif
 		"-P <num>   : start writing after buffer has been filled more than <num>%%\n"
 		"-p <num>   : start reading after buffer has been filled less than <num>%%\n"
 		"-i <file>  : use <file> for input\n"
@@ -794,6 +880,8 @@ static void usage(void)
 		"-T <file>  : as -t but uses <file> as buffer\n"
 		"-l <file>  : use <file> for logging messages\n"
 		"-u <num>   : pause <num> milliseconds after each write\n"
+		"-r <rate>  : limit read rate to <rate> B/s, where <rate> can be given in k,M,G\n"
+		"-R <rate>  : same as -r for writing; use eiter one, if your tape is too fast\n"
 		"-f         : overwrite existing files\n"
 		"-a <time>  : autoloader which needs <time> seconds to reload\n"
 		"-A <cmd>   : issue command <cmd> to request new volume\n"
@@ -819,6 +907,9 @@ static unsigned long long calcint(const char **argv, int c, unsigned long long d
 	unsigned long long i;
 	
 	switch (sscanf(argv[c],"%llu%c",&i,&ch)) {
+	default:
+		assert(0);
+		break;
 	case 2:
 		switch (ch) {
 		case 'k':
@@ -840,11 +931,13 @@ static unsigned long long calcint(const char **argv, int c, unsigned long long d
 				fatal("invalid value for number of bytes");
 			return i;
 		default:
-			fatal("unrecognized size charakter '%c' in option\n",c);
+			errormsg("unrecognized size charakter \"%c\" for option \"%s\"\n",ch,argv[c-1]);
 			return d;
 		}
 	case 1:
 		return i;
+	case 0:
+		break;
 	}
 	errormsg("unrecognized argument \"%s\" for option \"%s\"\n",argv[c],argv[c-1]);
 	return d;
@@ -917,6 +1010,12 @@ int main(int argc, const char **argv)
 		} else if (!argcheck("-u",argv,&c)) {
 			Pause = (atoi(argv[c])) ? (atoi(argv[c])) * 1000 : Pause;
 			debugmsg("Pause = %d\n",Pause);
+		} else if (!argcheck("-r",argv,&c)) {
+			MaxReadSpeed = calcint(argv,c,0);
+			debugmsg("MaxReadSpeed = %lld\n",MaxReadSpeed);
+		} else if (!argcheck("-R",argv,&c)) {
+			MaxWriteSpeed = calcint(argv,c,0);
+			debugmsg("MaxWriteSpeed = %lld\n",MaxWriteSpeed);
 		} else if (!argcheck("-n",argv,&c)) {
 			Multivolume = atoi(argv[c]) - 1;
 			if (Multivolume <= 0)
