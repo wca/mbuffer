@@ -1367,7 +1367,7 @@ test -n "$target_alias" &&
   program_prefix=${target_alias}-
 
 PACKAGE=mbuffer
-VERSION=20060616
+VERSION=20060626
 
 
 test "$prefix" = NONE && prefix=/usr/local

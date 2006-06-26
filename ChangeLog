@@ -1,3 +1,10 @@
+20060626:
+- bugfix and enhancement for rate limitation code
+- fixed regressions caused by switching from float to double
+- make sure outputThread doesn't start initially if -P is set
+- write debug logs a little bit more thread friendly 
+  (i.e. switched from stream- to normal file ops)
+
 20060616:
 - added speed limiting (options -r and -R)
 - fix errormessage in calcint
