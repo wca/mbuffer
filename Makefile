@@ -1,16 +1,16 @@
-CC		= @CC@
-DEFS		= @DEFS@
-CFLAGS		= @CFLAGS@ -O $(DEFS)
-LDFLAGS		= @LDFLAGS@
-LIBS		= @LIBS@
+CC		= cc
+DEFS		= -DHAVE_CONFIG_H
+CFLAGS		= -g -O2 -Wall -O $(DEFS)
+LDFLAGS		= 
+LIBS		= -lssl -lpthread 
 
-prefix		= @prefix@
-exec_prefix     = @exec_prefix@
-bindir          = @bindir@
-mandir		= @mandir@/man1
+prefix		= /usr/local
+exec_prefix     = /usr/local
+bindir          = ${exec_prefix}/bin
+mandir		= ${prefix}/man/man1
 
-RM		= @RM@
-INSTALL		= @INSTALL@
+RM		= /bin/rm
+INSTALL		= /usr/bin/install -c
 
 TARGET		= mbuffer
 SOURCES		= mbuffer.c

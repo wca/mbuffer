@@ -79,6 +79,7 @@ static volatile int Finish = 0, Terminate = 0;
 static unsigned long long  Rest = 0, Blocksize = 10240, Numblocks = 256,
 	MaxReadSpeed = 0, MaxWriteSpeed = 0;
 static volatile unsigned long long Numin = 0, Numout = 0;
+static volatile int HighMark = 0, LowMark = 0;
 static double StartWrite = 0, StartRead = 1;
 static char *Tmpfile = 0, **Buffer;
 static const char *Infile = 0, *Outfile = 0, *Autoload_cmd = 0;
@@ -90,8 +91,12 @@ static MD5_CTX md5ctxt;
 #elif defined HAVE_LIBSSL
 static MD5_CTX md5ctxt;
 #endif
-static sem_t Dev2Buf, Buf2Dev, PercentageLow, PercentageHigh;
-static pthread_mutex_t TermMut = PTHREAD_MUTEX_INITIALIZER;
+static sem_t Dev2Buf, Buf2Dev;
+static pthread_cond_t PercLow = PTHREAD_COND_INITIALIZER,
+		      PercHigh = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t TermMut = PTHREAD_MUTEX_INITIALIZER,
+		       LowMut = PTHREAD_MUTEX_INITIALIZER,
+		       HighMut = PTHREAD_MUTEX_INITIALIZER;
 static int Log = -1, Tty = -1;
 static FILE *Terminal = 0;
 static struct timeval Starttime;
@@ -189,12 +194,16 @@ static void summary(unsigned long long numb, double secs)
 	
 	secs -= m * 60 + h * 3600;
 	msg += sprintf(msg,"\nsummary: ");
-	if (numb < 1331ULL)			/* 1.3 kB */
+	if (numb < 10000ULL)
 		msg += sprintf(msg,"%llu Byte in ",numb);
-	else if (numb < 1363149ULL)		/* 1.3 MB */
+	else if (numb < 100*1024ULL)
 		msg += sprintf(msg,"%.1lf kB in ",(double)numb / 1024);
-	else if (numb < 1395864371ULL)		/* 1.3 GB */
+	else if (numb < 10000*1024ULL)
+		msg += sprintf(msg,"%.0lf kB in ",(double)numb / 1024);
+	else if (numb < 100*1024*1024ULL)
 		msg += sprintf(msg,"%.1lf MB in ",(double)numb / (double)(1<<20));
+	else if (numb < 10000*1024*1024ULL)
+		msg += sprintf(msg,"%.0lf MB in ",(double)numb / (double)(1<<20));
 	else
 		msg += sprintf(msg,"%.1lf GB in ",(double)numb / (1<<30));
 	if (h)
@@ -203,14 +212,26 @@ static void summary(unsigned long long numb, double secs)
 		msg += sprintf(msg,"%2d min ",m);
 	msg += sprintf(msg,"%02.1f sec - ",secs);
 	msg += sprintf(msg,"average of ");
-	if (av < 1331)
-		msg += sprintf(msg,"%.0lf B/s\n",av);
-	else if (av < 1363149)			/* 1.3 MB */
-		msg += sprintf(msg,"%.1lf kB/s\n",av/1024);
-	else if (av < 1395864371)		/* 1.3 GB */
-		msg += sprintf(msg,"%.1lf MB/s\n",av/1048576);
+	if (av < 100)
+		msg += sprintf(msg,"%.1lf B/s",av);
+	else if (av < 10000)
+		msg += sprintf(msg,"%.0lf B/s",av);
+	else if (av < 100*1024)
+		msg += sprintf(msg,"%.1lf kB/s",av/1024);
+	else if (av < 10000*1024)
+		msg += sprintf(msg,"%.0lf kB/s",av/1024);
+	else if (av < 100*1024*1024)
+		msg += sprintf(msg,"%.1lf MB/s",av/1048576);
+	else if (av < 1E4*1024*1024)
+		msg += sprintf(msg,"%.0lf MB/s",av/1048576);
 	else
-		msg += sprintf(msg,"%.1lf GB/s\n",av/1073741824);	/* OK - this is really silly - at least now in 2003, yeah and still in 2005... */
+		msg += sprintf(msg,"%.1lf GB/s",av/1073741824);	/* OK - this is really silly - at least now in 2003, yeah and still in 2005... */
+	if (LowMark)
+		msg += sprintf(msg,", %dx empty",LowMark);
+	if (HighMark)
+		msg += sprintf(msg,", %dx full",HighMark);
+	*msg++ = '\n';
+	*msg = 0;
 #ifdef HAVE_LIBMHASH
 	if (Hash) {
 		unsigned char hashvalue[16];
@@ -267,8 +288,8 @@ static RETSIGTYPE sigHandler(int signr)
 static void statusThread(void) 
 {
 	struct timeval last, now;
-	double in = 0, out = 0, diff, fill;
-	unsigned long long total, lin = 0, lout = 0;
+	double in = 0, out = 0, total, diff, fill;
+	unsigned long long lin = 0, lout = 0;
 	int unwritten = 1;	/* assumption: initially there is at least one unwritten block */
 	int ret;
 
@@ -279,7 +300,7 @@ static void statusThread(void)
 #endif
 	while (!(Finish && (unwritten == 0)) && (Terminate == 0)) {
 		int err;
-		char id = 'k', od = 'k', td = 'k', buf[256];
+		char id = 'k', od = 'k', td = 'k', buf[256], *b = buf;
 		err = pthread_mutex_lock(&TermMut);
 		assert(0 == err);
 		sem_getvalue(&Buf2Dev,&unwritten);
@@ -288,13 +309,13 @@ static void statusThread(void)
 		diff = now.tv_sec - last.tv_sec + (double) (now.tv_usec - last.tv_usec) / 1000000;
 		in = ((Numin - lin) * Blocksize) >> 10;
 		in /= diff;
-		if (in > 3 * 1024) {
+		if (in >= 10000) {
 			id = 'M';
 			in /= 1024;
 		}
 		out = ((Numout - lout) * Blocksize) >> 10;
 		out /= diff;
-		if (out > 3 * 1024) {
+		if (out >= 10000) {
 			od = 'M';
 			out /= 1024;
 		}
@@ -302,16 +323,32 @@ static void statusThread(void)
 		lout = Numout;
 		last = now;
 		total = (Numout * Blocksize) >> 10;
-		if (total > 3 * 1024) {
+		if (total >= 10000) {
 			td = 'M';
-			total >>= 10;
+			total /= 1024;
 		}
-		if (total > 3 * 1024) {
+		if (total >= 10000) {
 			td = 'G';
-			total >>= 10;
+			total /= 1024;
+		}
+		if (total >= 10000) {
+			td = 'T';
+			total /= 1024;
 		}
 		fill = (fill < 0) ? 0 : fill;
-		sprintf(buf,"\rin @ %6.1lf %cB/s, out @ %6.1lf %cB/s, %4llu %cB total, buffer %3.0lf%% full",in,id,out,od,total,td,fill);
+		if (in < 100)
+			b += sprintf(b,"\rin @ %4.1lf %cB/s",in,id);
+		else
+			b += sprintf(b,"\rin @ %4.0lf %cB/s",in,id);
+		if (out < 100)
+			b += sprintf(b,", out @ %4.1lf %cB/s",out,od);
+		else
+			b += sprintf(b,", out @ %4.0lf %cB/s",out,od);
+		if (total < 100)
+			b += sprintf(b,", %4.1lf %cB total",total,td);
+		else
+			b += sprintf(b,", %4.0lf %cB total",total,td);
+		sprintf(b,", buffer %3.0lf%% full",fill);
 		(void) write(Tty,buf,strlen(buf));
 		err = pthread_mutex_unlock(&TermMut);
 		assert(0 == err);
@@ -469,8 +506,14 @@ static void *inputThread(void *ignored)
 	infomsg("inputThread: starting...\n");
 	for (;;) {
 		if ((startread < 1) && (fill == Numblocks - 1)) {
+			int err;
 			debugmsg("inputThread: buffer full, waiting for it to drain.\n");
-			sem_wait(&PercentageLow);
+			pthread_mutex_lock(&LowMut);
+			err = pthread_cond_wait(&PercLow,&LowMut);
+			assert(err == 0);
+			pthread_mutex_unlock(&LowMut);
+			++LowMark;
+			debugmsg("inputThread: low watermark reached, continuing...\n");
 		}
 		sem_wait(&Dev2Buf); /* Wait for one or more buffer blocks to be free */
 		if (Terminate) {	/* for async termination requests */
@@ -493,7 +536,7 @@ static void *inputThread(void *ignored)
 					Rest = num;
 					sem_post(&Buf2Dev);
 				}
-				sem_post(&PercentageLow);
+				pthread_cond_signal(&PercLow);
 				Finish = 1;
 				infomsg("inputThread: exiting...\n");
 				pthread_exit((void *) 0);
@@ -512,7 +555,7 @@ static void *inputThread(void *ignored)
 					MD5_Update(&md5ctxt,Buffer[at],num);
 				#endif
 				sem_post(&Buf2Dev);
-				sem_post(&PercentageHigh);
+				pthread_cond_signal(&PercHigh);
 				infomsg("inputThread: exiting...\n");
 				pthread_exit(0);
 			} 
@@ -533,12 +576,7 @@ static void *inputThread(void *ignored)
 		sem_post(&Buf2Dev);
 		sem_getvalue(&Buf2Dev,&fill);
 		if (((double) fill / (double) Numblocks) >= startwrite) {
-			int perc;
-			sem_getvalue(&PercentageHigh,&perc);
-			if (!perc) {
-				infomsg("\ninputThread: high watermark reached - restarting output...\n");
-				sem_post(&PercentageHigh);
-			}
+			pthread_cond_signal(&PercHigh);
 		}
 		at++;
 		if (at == Numblocks)
@@ -600,7 +638,7 @@ static void requestOutputVolume(void)
 			errormsg("error reopening output file: %s\n",strerror(errno));
 #ifdef __sun
 		else if (-1 == directio(Out,DIRECTIO_ON))
-			debugmsg("direct I/O hinting failed: %s\n",strerror(errno));
+			infomsg("direct I/O hinting failed: %s\n",strerror(errno));
 #endif
 	} while (-1 == Out);
 	infomsg("continuing with next volume\n");
@@ -646,8 +684,14 @@ static void *outputThread(void *ignored)
 	for (;;) {
 		unsigned long long rest = blocksize;
 		if ((fill == 0) && (startwrite > 0)) {
+			int err;
 			debugmsg("outputThread: buffer empty, waiting for it to fill\n");
-			sem_wait(&PercentageHigh);
+			pthread_mutex_lock(&HighMut);
+			err = pthread_cond_wait(&PercHigh,&HighMut);
+			assert(err == 0);
+			pthread_mutex_unlock(&HighMut);
+			++HighMark;
+			debugmsg("outputThread: high watermark reached, continuing...\n");
 		}
 		sem_wait(&Buf2Dev);
 		if (Terminate) {
@@ -731,12 +775,7 @@ static void *outputThread(void *ignored)
 		}
 		sem_getvalue(&Buf2Dev,&fill);
 		if ((startread < 1) && ((double)fill / (double)Numblocks) < startread) {
-			int perc;
-			sem_getvalue(&PercentageLow,&perc);
-			if (!perc) {
-				infomsg("\noutputThread: low watermark reached - restarting input...\n");
-				sem_post(&PercentageLow);
-			}
+			pthread_cond_signal(&PercLow);
 		}
 		Numout++;
 	}
@@ -1233,10 +1272,6 @@ int main(int argc, const char **argv)
 		fatal("Error creating semaphore Buf2Dev: %s\n",strerror(errno));
 	if (0 != sem_init(&Dev2Buf,0,Numblocks))
 		fatal("Error creating semaphore Dev2Buf: %s\n",strerror(errno));
-	if (0 != sem_init(&PercentageHigh,0,0))
-		fatal("Error creating semaphore PercentageHigh: %s\n",strerror(errno));
-	if (0 != sem_init(&PercentageLow,0,0))
-		fatal("Error creating semaphore PercentageLow: %s\n",strerror(errno));
 
 	debugmsg("opening streams...\n");
 	if (Infile) {
@@ -1249,10 +1284,12 @@ int main(int argc, const char **argv)
 	if (Outfile) {
 		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|OptSync,0666)))
 			fatal("could not open output file: %s\n",strerror(errno));
+		/*
 #ifdef __sun
 		else if (-1 == directio(Out,DIRECTIO_ON))
 			debugmsg("direct I/O hinting failed: %s\n",strerror(errno));
 #endif
+*/
 	} else if (netPortOut) {
 		openNetworkOutput(server,netPortOut);
 	} else

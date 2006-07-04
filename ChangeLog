@@ -1,3 +1,10 @@
+20060704:
+- use condition variables to safely signal crossing of watermarks
+- include times full/empty (crossing of low/high watermark) in summary
+  (proposal by Alex Kramarov)
+- enhanced status and summary output to be display stats with a higher
+  precisions
+
 20060626:
 - bugfix and enhancement for rate limitation code
 - fixed regressions caused by switching from float to double
