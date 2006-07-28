@@ -1,3 +1,10 @@
+20060728:
+- changed signal handling to prevent syscalls returning with EINTR in
+  reader and writer
+- fix for warnings, fatals, and errors getting truncated
+- sleep before printing I/O rates for the first time to prevent showing
+  insane values
+
 20060704:
 - use condition variables to safely signal crossing of watermarks
 - include times full/empty (crossing of low/high watermark) in summary

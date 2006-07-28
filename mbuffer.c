@@ -145,8 +145,8 @@ static void warningmsg(const char *msg, ...)
 
 		va_start(val,msg);
 		num = vsnprintf(buf+9,sizeof(buf)-9,msg,val);
-		assert(num < sizeof(buf));
-		(void) write(Log,buf,num);
+		assert(num+9 < sizeof(buf));
+		(void) write(Log,buf,num + 9);
 		va_end(val);
 	}
 }
@@ -160,9 +160,9 @@ static void errormsg(const char *msg, ...)
 		int num;
 
 		va_start(val,msg);
-		num = vsnprintf(buf+7,sizeof(buf)-9,msg,val);
-		assert(num < sizeof(buf));
-		(void) write(Log,buf,num);
+		num = vsnprintf(buf+7,sizeof(buf)-7,msg,val);
+		assert(num+7 < sizeof(buf));
+		(void) write(Log,buf,num+7);
 		va_end(val);
 	}
 }
@@ -176,9 +176,9 @@ static void fatal(const char *msg, ...)
 		int num;
 
 		va_start(val,msg);
-		num = vsnprintf(buf+7,sizeof(buf)-9,msg,val);
+		num = vsnprintf(buf+7,sizeof(buf)-7,msg,val);
 		assert(num < sizeof(buf));
-		(void) write(Log,buf,num);
+		(void) write(Log,buf,num+7);
 		va_end(val);
 	}
 	exit(EXIT_FAILURE);
@@ -301,6 +301,7 @@ static void statusThread(void)
 	while (!(Finish && (unwritten == 0)) && (Terminate == 0)) {
 		int err;
 		char id = 'k', od = 'k', td = 'k', buf[256], *b = buf;
+		(void) usleep(500000);
 		err = pthread_mutex_lock(&TermMut);
 		assert(0 == err);
 		sem_getvalue(&Buf2Dev,&unwritten);
@@ -352,7 +353,6 @@ static void statusThread(void)
 		(void) write(Tty,buf,strlen(buf));
 		err = pthread_mutex_unlock(&TermMut);
 		assert(0 == err);
-		(void) usleep(500000);
 	}
 	if (Terminate) {
 		infomsg("\nterminating...\n");
@@ -1012,6 +1012,7 @@ int main(int argc, const char **argv)
 	unsigned u;
 	long mxnrsem;
 	int err, optMset = 0, optSset = 0, optBset = 0, c;
+	sigset_t       signalSet;
 #ifdef HAVE_ST_BLKSIZE
 	struct stat st;
 	int setOutsize = 0;
@@ -1343,10 +1344,13 @@ int main(int argc, const char **argv)
 		warningmsg("error registering new SIGINT handler: %s\n",strerror(errno));
 
 	debugmsg("starting threads...\n");
+	sigfillset(&signalSet);
+	(void) pthread_sigmask(SIG_BLOCK, &signalSet, NULL);
 	err = pthread_create(&Writer,0,&outputThread,0);
 	assert(0 == err);
 	err = pthread_create(&Reader,0,&inputThread,0);
 	assert(0 == err);
+	(void) pthread_sigmask(SIG_UNBLOCK, &signalSet, NULL);
 	if (Status)
 		statusThread();
 	else {
