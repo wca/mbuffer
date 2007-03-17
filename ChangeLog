@@ -1,3 +1,7 @@
+20060317:
+- fix: mbuffer erroneously return with EXIT_SUCCESS when it got 
+       interrupted by SIGINT or SIGTERM
+
 20060728:
 - changed signal handling to prevent syscalls returning with EINTR in
   reader and writer

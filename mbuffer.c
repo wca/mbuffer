@@ -276,6 +276,7 @@ static RETSIGTYPE sigHandler(int signr)
 	switch (signr) {
 	case SIGINT:
 	case SIGTERM:
+		ErrorOccured = 1;
 		Terminate = 1;
 		break;
 	default:
