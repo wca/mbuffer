@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include <limits.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -66,6 +67,8 @@
 #define LARGEFILE 0
 #endif
 
+#define MSGSIZE 256
+
 static pthread_t Reader, Writer;
 static long Verbose = 3, In = 0, Out = 0, Tmp = 0, Pause = 0, Memmap = 0,
 	Status = 1, Nooverwrite = O_EXCL, Outblocksize = 0,
@@ -81,9 +84,9 @@ static unsigned long long  Rest = 0, Blocksize = 10240, Numblocks = 256,
 static volatile unsigned long long Numin = 0, Numout = 0;
 static volatile int HighMark = 0, LowMark = 0;
 static double StartWrite = 0, StartRead = 1;
-static char *Tmpfile = 0, **Buffer;
+static char *Tmpfile = 0, **Buffer, *Msgbuf, *Msg;
 static const char *Infile = 0, *Outfile = 0, *Autoload_cmd = 0;
-static int Multivolume = 0, Memlock = 0, Sendout = 0;
+static int Multivolume = 0, Memlock = 0, Sendout = 0, PrefixLen;
 #ifdef HAVE_LIBMHASH
 static MHASH MD5hash;
 #elif defined HAVE_LIBMD5
@@ -107,13 +110,12 @@ static void debugmsg(const char *msg, ...)
 {
 	if (Verbose >= 5) {
 		va_list val;
-		char buf[256];
 		int num;
 
 		va_start(val,msg);
-		num = vsnprintf(buf,sizeof(buf),msg,val);
-		assert(num < sizeof(buf));
-		(void) write(Log,buf,num);
+		num = vsnprintf(Msgbuf,MSGSIZE,msg,val);
+		assert(num < MSGSIZE);
+		(void) write(Log,Msg,num + PrefixLen);
 		va_end(val);
 	}
 }
@@ -125,13 +127,12 @@ static void infomsg(const char *msg, ...)
 {
 	if (Verbose >= 4) {
 		va_list val;
-		char buf[256];
 		int num;
 
 		va_start(val,msg);
-		num = vsnprintf(buf,sizeof(buf),msg,val);
-		assert(num < sizeof(buf));
-		(void) write(Log,buf,num);
+		num = vsnprintf(Msgbuf,MSGSIZE,msg,val);
+		assert(num < MSGSIZE);
+		(void) write(Log,Msg,num + PrefixLen);
 		va_end(val);
 	}
 }
@@ -140,13 +141,13 @@ static void warningmsg(const char *msg, ...)
 {
 	if (Verbose >= 3) {
 		va_list val;
-		char buf[256] = "warning: ";
-		int num;
+		int num = 9;
 
 		va_start(val,msg);
-		num = vsnprintf(buf+9,sizeof(buf)-9,msg,val);
-		assert(num+9 < sizeof(buf));
-		(void) write(Log,buf,num + 9);
+		memcpy(Msgbuf,"warning: ",9);
+		num += vsnprintf(Msgbuf+9,MSGSIZE-9,msg,val);
+		assert(num < MSGSIZE);
+		(void) write(Log,Msg,num + PrefixLen);
 		va_end(val);
 	}
 }
@@ -156,13 +157,13 @@ static void errormsg(const char *msg, ...)
 	ErrorOccured = 1;
 	if (Verbose >= 2) {
 		va_list val;
-		char buf[256] = "error: ";
-		int num;
+		int num = 7;
 
 		va_start(val,msg);
-		num = vsnprintf(buf+7,sizeof(buf)-7,msg,val);
-		assert(num+7 < sizeof(buf));
-		(void) write(Log,buf,num+7);
+		memcpy(Msgbuf,"error: ",7);
+		num += vsnprintf(Msgbuf+7,MSGSIZE-7,msg,val);
+		assert(num < MSGSIZE);
+		(void) write(Log,Msg,num + PrefixLen);
 		va_end(val);
 	}
 }
@@ -172,13 +173,13 @@ static void fatal(const char *msg, ...)
 {
 	if (Verbose >= 1) {
 		va_list val;
-		char buf[256] = "fatal: ";
-		int num;
+		int num = 7;
 
 		va_start(val,msg);
-		num = vsnprintf(buf+7,sizeof(buf)-7,msg,val);
-		assert(num < sizeof(buf));
-		(void) write(Log,buf,num+7);
+		memcpy(Msgbuf,"fatal: ",7);
+		num += vsnprintf(Msgbuf+7,MSGSIZE-7,msg,val);
+		assert(num < MSGSIZE);
+		(void) write(Log,Msg,num + PrefixLen);
 		va_end(val);
 	}
 	exit(EXIT_FAILURE);
@@ -761,7 +762,7 @@ static void *outputThread(void *ignored)
 					if (errno == EINTR) {
 						continue;
 					} else if (errno == EINVAL) {
-						warningmsg("output does not support syncing: omitted.");
+						warningmsg("output does not support syncing: omitted.\n");
 						break;
 					} else {
 						fatal("error syncing: %s\n",strerror(errno));
@@ -821,12 +822,12 @@ static void openNetworkInput(const char *host, unsigned short port)
 		if (0 > In)
 			fatal("could not accept connection for network input: %s\n",strerror(errno));
 		if (host == 0) {
-			infomsg("connection accepted");
+			infomsg("connection accepted\n");
 			return;
 		}
 		for (p = h->h_addr_list; *p; ++p) {
 			if (0 == memcmp(&caddr.sin_addr,*p,h->h_length)) {
-				infomsg("connection accepted");
+				infomsg("connection accepted\n");
 				return;
 			}
 		}
@@ -977,7 +978,7 @@ static unsigned long long calcint(const char **argv, int c, unsigned long long d
 		case 'b':
 		case 'B':
 			if (i < 128)
-				fatal("invalid value for number of bytes");
+				fatal("invalid value for number of bytes\n");
 			return i;
 		default:
 			errormsg("unrecognized size charakter \"%c\" for option \"%s\"\n",ch,argv[c-1]);
@@ -1021,7 +1022,15 @@ int main(int argc, const char **argv)
 	unsigned short netPortIn = 0;
 	const char *server = 0, *client = 0;
 	unsigned short netPortOut = 0;
+	char *argv0 = strdup(argv[0]), *progname;
 	
+	progname = basename(argv0);
+	PrefixLen = strlen(progname) + 2;
+	Msg = malloc(PrefixLen + MSGSIZE);
+	strcpy(Msg,progname);
+	Msg[PrefixLen - 2] = ':';
+	Msg[PrefixLen - 1] = ' ';
+	Msgbuf = Msg + PrefixLen;
 	Log = STDERR_FILENO;
 	for (c = 1; c < argc; c++) {
 		if (!argcheck("-s",argv,&c)) {
@@ -1153,7 +1162,7 @@ int main(int argc, const char **argv)
 			Hash = 1;
 			MD5hash = mhash_init(MHASH_MD5);
 			if (MHASH_FAILED == MD5hash) {
-				errormsg("error initializing md5 hasing - will not generate hash...");
+				errormsg("error initializing md5 hasing - will not generate hash...\n");
 				Hash = 0;
 			}
 #elif defined HAVE_LIBMD5
@@ -1181,7 +1190,7 @@ int main(int argc, const char **argv)
 		infomsg("blocksize = %llu\n",Blocksize);
 	}
 	if ((StartRead < 1) && (StartWrite > 0))
-		fatal("setting both low watermark and high watermark doesn't make any sense...");
+		fatal("setting both low watermark and high watermark doesn't make any sense...\n");
 	if (Autoloader) {
 		if ((!Outfile) && (!Infile))
 			fatal("Setting autoloader time without using a device doesn't make any sense!\n");
@@ -1329,12 +1338,12 @@ int main(int argc, const char **argv)
 		warningmsg("could not open terminal: %s\n",strerror(errno));
 		if (Multivolume && (Autoloader == 0))
 			fatal("Manual multivolume support only works with a controlling terminal.\n");
-		warningmsg("disabled manual multivolume support and display of throughput");
+		warningmsg("Disabled manual multivolume support and display of throughput.\n");
 	}
 	Tty = open("/dev/tty",O_RDWR);
 	if ((Tty == -1) && (Status != 0)) {
 		warningmsg("could not open /dev/tty: %s\n",strerror(errno));
-		warningmsg("disabling display of throughput");
+		warningmsg("disabling display of throughput\n");
 		Status = 0;
 	}
 

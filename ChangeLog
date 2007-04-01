@@ -1,3 +1,9 @@
+20060401:
+- prefix name of executable before every message
+- added some missing newlines
+- set dependency for "make install" on "make"
+  (i.e. "make install" also builds mbuffer)
+
 20060317:
 - fix: mbuffer erroneously return with EXIT_SUCCESS when it got 
        interrupted by SIGINT or SIGTERM
