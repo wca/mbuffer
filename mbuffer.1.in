@@ -37,9 +37,9 @@ use blocks of \fIsize\fP bytes for buffer (default 10240)
 .TP 
 \fB\-m\fR <\fIsize\fP>
 use a total of \fIsize\fP bytes for buffer (default 2MB) - size can be
-set with a trailing charakter (b and B for Byte, k for kByte, M for
+set with a trailing character (b and B for Byte, k for kByte, M for
 MByte, G for Gigabyte, and with % for a percentage of total physical 
-memory
+memory)
 .TP 
 \fB\-L\f
 lock buffer in memory - this option is not available for file-based buffers and requires mbuffer to be setuid root (use with care)
@@ -55,6 +55,13 @@ as \-t but use \fIfile\fP instead
 .TP 
 \fB\-d\fR
 use blocksize of device for output (needed for some devices, slows output down)
+.TP 
+\fB\-D\fR <\fIsize\fP>
+assume an output volume of \fIsize\fP bytes (default infinite) after which
+a volume change will be initiated. Small values are useful for the timely
+testing of multi-volume runs; accurate values if your device doesn't properly
+signal end of media. Size can be set with a trailing character (b and B
+for Byte, k for kByte, M for MByte, or G for Gigabyte)
 .TP 
 \fB\-P\fR <\fInum\fP>
 start writing after the buffer has been filled to \fInum\fP% (default 0 \- start at once)

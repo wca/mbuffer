@@ -80,7 +80,7 @@ static long  Hash = 0;
 #endif
 static volatile int Finish = 0, Terminate = 0;
 static unsigned long long  Rest = 0, Blocksize = 10240, Numblocks = 256,
-	MaxReadSpeed = 0, MaxWriteSpeed = 0;
+	MaxReadSpeed = 0, MaxWriteSpeed = 0, OutVolsize = 0;
 static volatile unsigned long long Numin = 0, Numout = 0;
 static volatile int HighMark = 0, LowMark = 0;
 static double StartWrite = 0, StartRead = 1;
@@ -144,7 +144,7 @@ static void warningmsg(const char *msg, ...)
 		int num = 9;
 
 		va_start(val,msg);
-		memcpy(Msgbuf,"warning: ",9);
+		(void) memcpy(Msgbuf,"warning: ",9);
 		num += vsnprintf(Msgbuf+9,MSGSIZE-9,msg,val);
 		assert(num < MSGSIZE);
 		(void) write(Log,Msg,num + PrefixLen);
@@ -160,7 +160,7 @@ static void errormsg(const char *msg, ...)
 		int num = 7;
 
 		va_start(val,msg);
-		memcpy(Msgbuf,"error: ",7);
+		(void) memcpy(Msgbuf,"error: ",7);
 		num += vsnprintf(Msgbuf+7,MSGSIZE-7,msg,val);
 		assert(num < MSGSIZE);
 		(void) write(Log,Msg,num + PrefixLen);
@@ -176,7 +176,7 @@ static void fatal(const char *msg, ...)
 		int num = 7;
 
 		va_start(val,msg);
-		memcpy(Msgbuf,"fatal: ",7);
+		(void) memcpy(Msgbuf,"fatal: ",7);
 		num += vsnprintf(Msgbuf+7,MSGSIZE-7,msg,val);
 		assert(num < MSGSIZE);
 		(void) write(Log,Msg,num + PrefixLen);
@@ -287,6 +287,27 @@ static RETSIGTYPE sigHandler(int signr)
 
 
 
+/* Thread-safe replacement for usleep. Argument must be a whole
+ * number of microseconds to sleep.
+ */
+static int mt_usleep(unsigned long sleep_usecs)
+{
+	struct timespec tv;
+	tv.tv_sec = sleep_usecs / 1000000;
+	tv.tv_nsec = (sleep_usecs % 1000000) * 1000;
+
+	do {
+		/* Sleep for the time specified in tv. If interrupted by a
+		 * signal, place the remaining time left to sleep back into tv.
+		 */
+		if (0 == nanosleep(&tv, &tv)) 
+			return 0;
+	} while (errno == EINTR);
+	return -1;
+}
+
+
+
 static void statusThread(void) 
 {
 	struct timeval last, now;
@@ -298,15 +319,16 @@ static void statusThread(void)
 	(void) gettimeofday(&Starttime,0);
 	last = Starttime;
 #ifdef __alpha
-	(void) usleep(1000);	/* needed on alpha (stderr fails with fpe on nan) */
+	(void) mt_usleep(1000);	/* needed on alpha (stderr fails with fpe on nan) */
 #endif
 	while (!(Finish && (unwritten == 0)) && (Terminate == 0)) {
 		int err;
 		char id = 'k', od = 'k', td = 'k', buf[256], *b = buf;
-		(void) usleep(500000);
+		(void) mt_usleep(500000);
 		err = pthread_mutex_lock(&TermMut);
 		assert(0 == err);
-		sem_getvalue(&Buf2Dev,&unwritten);
+		err = sem_getvalue(&Buf2Dev,&unwritten);
+		assert(0 == err);
 		fill = (double)unwritten / (double)Numblocks * 100.0;
 		(void) gettimeofday(&now,0);
 		diff = now.tv_sec - last.tv_sec + (double) (now.tv_usec - last.tv_usec) / 1000000;
@@ -351,7 +373,7 @@ static void statusThread(void)
 			b += sprintf(b,", %4.1lf %cB total",total,td);
 		else
 			b += sprintf(b,", %4.0lf %cB total",total,td);
-		sprintf(b,", buffer %3.0lf%% full",fill);
+		(void) sprintf(b,", buffer %3.0lf%% full",fill);
 		(void) write(Tty,buf,strlen(buf));
 		err = pthread_mutex_unlock(&TermMut);
 		assert(0 == err);
@@ -414,7 +436,7 @@ static long long enforceSpeedLimit(unsigned long long limit, long long num, stru
 			stime = w / ticktime;
 			stime *= ticktime;
 			debugmsg("enforceSpeedLimit(%lld,%lld): sleeping for %lld usec\n",limit,num,stime);
-			(void) usleep(stime);
+			(void) mt_usleep(stime);
 			(void) gettimeofday(last,0);
 			slept = timediff(last,&now);
 			assert(slept >= 0);
@@ -444,13 +466,10 @@ static void requestInputVolume(void)
 {
 	char cmd_buf[15+strlen(Infile)];
 	const char *cmd;
-	int err;
 
 	debugmsg("requesting new volume for input\n");
 	if (-1 == close(In))
 		errormsg("error closing input: %s\n",strerror(errno));
-	err = pthread_mutex_lock(&TermMut);
-	assert(0 == err);
 	do {
 		if ((Autoloader) && (Infile)) {
 			infomsg("requesting change of volume...\n");
@@ -469,34 +488,41 @@ static void requestInputVolume(void)
 			if (Autoload_time)
 				(void) sleep(Autoload_time);
 		} else {
+			int err;
 			if (Terminal == 0) {
 				errormsg("End of volume, but not end of input.\n"
 					"Specify an autoload command, if you are working without terminal.\n");
 				Finish = 1;
-				err = pthread_mutex_unlock(&TermMut);
-				assert(0 == err);
 				pthread_exit((void *) -1);
 			}
+			err = pthread_mutex_lock(&TermMut);
+			assert(0 == err);
 			(void) fprintf(Terminal,"\ninsert next volume and press return to continue...");
 			(void) fflush(Terminal);
 			(void) tcflush(fileno(Terminal),TCIFLUSH);
 			(void) fgetc(Terminal);
+			err = pthread_mutex_unlock(&TermMut);
+			assert(0 == err);
 		}
 		if (-1 == (In = open(Infile,O_RDONLY|LARGEFILE)))
 			errormsg("could not reopen input: %s\n",strerror(errno));
 	} while (In == -1);
 	Multivolume--;
-	(void) fprintf(Terminal,"\nOK - continuing...");
-	(void) fflush(Terminal);
-	err = pthread_mutex_unlock(&TermMut);
-	assert(0 == err);
+	if (Terminal && ! Autoloader) {
+		int err;
+		err = pthread_mutex_lock(&TermMut);
+		assert(0 == err);
+		(void) fprintf(Terminal,"\nOK - continuing...\n");
+		(void) fflush(Terminal);
+		err = pthread_mutex_unlock(&TermMut);
+		assert(0 == err);
+	}
 }
 
 
 
 static void *inputThread(void *ignored)
 {
-	int err;
 	int fill = 0;
 	unsigned long long num, at = 0;
 	long long xfer = 0;
@@ -507,17 +533,23 @@ static void *inputThread(void *ignored)
 	assert(ignored == 0);
 	infomsg("inputThread: starting...\n");
 	for (;;) {
+		int err;
+
+		err = pthread_mutex_lock(&LowMut);
+		assert(err == 0);
+		err = sem_getvalue(&Buf2Dev,&fill);
+		assert(err == 0);
 		if ((startread < 1) && (fill == Numblocks - 1)) {
-			int err;
 			debugmsg("inputThread: buffer full, waiting for it to drain.\n");
-			pthread_mutex_lock(&LowMut);
 			err = pthread_cond_wait(&PercLow,&LowMut);
 			assert(err == 0);
-			pthread_mutex_unlock(&LowMut);
 			++LowMark;
 			debugmsg("inputThread: low watermark reached, continuing...\n");
 		}
-		sem_wait(&Dev2Buf); /* Wait for one or more buffer blocks to be free */
+		err = pthread_mutex_unlock(&LowMut);
+		assert(err == 0);
+		err = sem_wait(&Dev2Buf); /* Wait for one or more buffer blocks to be free */
+		assert(err == 0);
 		if (Terminate) {	/* for async termination requests */
 			
 			debugmsg("inputThread: terminating upon termination request...\n");
@@ -528,21 +560,28 @@ static void *inputThread(void *ignored)
 		}
 		num = 0;
 		do {
-			err = read(In,Buffer[at] + num,Blocksize - num);
-			debugmsg("inputThread: read(In, Buffer[%llu] + %llu, %llu) = %d\n", at, num, Blocksize - num, err);
-			if ((!err) && (Terminal) && (Multivolume)) {
+			int in;
+			in = read(In,Buffer[at] + num,Blocksize - num);
+			debugmsg("inputThread: read(In, Buffer[%llu] + %llu, %llu) = %d\n", at, num, Blocksize - num, in);
+			if ((!in) && (Terminal||Autoloader) && (Multivolume)) {
 				requestInputVolume();
-			} else if (-1 == err) {
+			} else if (-1 == in) {
 				errormsg("inputThread: error reading at offset %llx: %s\n",Numin*Blocksize,strerror(errno));
 				if (num) {
 					Rest = num;
-					sem_post(&Buf2Dev);
+					err = sem_post(&Buf2Dev);
+					assert(err == 0);
 				}
-				pthread_cond_signal(&PercLow);
 				Finish = 1;
+				err = pthread_mutex_lock(&HighMut);
+				assert(err == 0);
+				err = pthread_cond_signal(&PercHigh);
+				assert(err == 0);
+				err = pthread_mutex_unlock(&HighMut);
+				assert(err == 0);
 				infomsg("inputThread: exiting...\n");
 				pthread_exit((void *) 0);
-			} else if (0 == err) {
+			} else if (0 == in) {
 				Rest = num;
 				Finish = 1;
 				debugmsg("inputThread: last block has %d bytes\n",num);
@@ -556,12 +595,18 @@ static void *inputThread(void *ignored)
 				if (Hash)
 					MD5_Update(&md5ctxt,Buffer[at],num);
 				#endif
-				sem_post(&Buf2Dev);
-				pthread_cond_signal(&PercHigh);
+				err = sem_post(&Buf2Dev);
+				assert(err == 0);
+				err = pthread_mutex_lock(&HighMut);
+				assert(err == 0);
+				err = pthread_cond_signal(&PercHigh);
+				assert(err == 0);
+				err = pthread_mutex_unlock(&HighMut);
+				assert(err == 0);
 				infomsg("inputThread: exiting...\n");
 				pthread_exit(0);
 			} 
-			num += err;
+			num += in;
 		} while (num < Blocksize);
 		#ifdef HAVE_LIBMHASH
 		if (Hash)
@@ -575,11 +620,18 @@ static void *inputThread(void *ignored)
 		#endif
 		if (MaxReadSpeed)
 			xfer = enforceSpeedLimit(MaxReadSpeed,xfer,&last);
-		sem_post(&Buf2Dev);
-		sem_getvalue(&Buf2Dev,&fill);
+		err = pthread_mutex_lock(&HighMut);
+		assert(err == 0);
+		err = sem_post(&Buf2Dev);
+		assert(err == 0);
+		err = sem_getvalue(&Buf2Dev,&fill);
+		assert(err == 0);
 		if (((double) fill / (double) Numblocks) >= startwrite) {
-			pthread_cond_signal(&PercHigh);
+			err = pthread_cond_signal(&PercHigh);
+			assert(err == 0);
 		}
+		err = pthread_mutex_unlock(&HighMut);
+		assert(err == 0);
 		at++;
 		if (at == Numblocks)
 			at = 0;
@@ -629,10 +681,9 @@ static void requestOutputVolume(void)
 			}
 			err = pthread_mutex_lock(&TermMut);
 			assert(0 == err);
-			(void) fprintf(Terminal,"\nvolume full - insert new media and press return whe ready...\n");
+			(void) fprintf(Terminal,"\nvolume full - insert new media and press return when ready...\n");
 			(void) tcflush(fileno(Terminal),TCIFLUSH);
 			(void) fgetc(Terminal);
-			(void) fprintf(Terminal,"\nOK - continuing...\n");
 			err = pthread_mutex_unlock(&TermMut);
 			assert(0 == err);
 		}
@@ -644,6 +695,15 @@ static void requestOutputVolume(void)
 #endif
 	} while (-1 == Out);
 	infomsg("continuing with next volume\n");
+	if (Terminal && ! Autoloader) {
+		int err;
+		err = pthread_mutex_lock(&TermMut);
+		assert(0 == err);
+		(void) fprintf(Terminal,"\nOK - continuing...\n");
+		(void) fflush(Terminal);
+		err = pthread_mutex_unlock(&TermMut);
+		assert(0 == err);
+	}
 }
 
 
@@ -670,6 +730,27 @@ static void checkIncompleteOutput(void)
 
 
 
+static void terminateOutputThread(void)
+{
+	infomsg("outputThread: syncing...\n");
+	while (0 != fsync(Out)) {
+		if (errno == EINTR) {
+			continue;
+		} else if (errno == EINVAL) {
+			warningmsg("output does not support syncing: omitted.\n");
+			break;
+		} else {
+			fatal("error syncing: %s\n",strerror(errno));
+		}
+	}
+	infomsg("outputThread: finished - exiting...\n");
+	if (-1 == close(Out))
+		errormsg("error closing output: %s\n",strerror(errno));
+	pthread_exit(0);
+}
+
+
+
 static void *outputThread(void *ignored)
 {
 	unsigned at = 0;
@@ -685,17 +766,23 @@ static void *outputThread(void *ignored)
 	infomsg("\noutputThread: starting...\n");
 	for (;;) {
 		unsigned long long rest = blocksize;
+		int err;
+
+		err = pthread_mutex_lock(&HighMut);
+		assert(err == 0);
+		err = sem_getvalue(&Buf2Dev,&fill);
+		assert(err == 0);
 		if ((fill == 0) && (startwrite > 0)) {
-			int err;
 			debugmsg("outputThread: buffer empty, waiting for it to fill\n");
-			pthread_mutex_lock(&HighMut);
 			err = pthread_cond_wait(&PercHigh,&HighMut);
 			assert(err == 0);
-			pthread_mutex_unlock(&HighMut);
 			++HighMark;
 			debugmsg("outputThread: high watermark reached, continuing...\n");
 		}
-		sem_wait(&Buf2Dev);
+		err = pthread_mutex_unlock(&HighMut);
+		assert(err == 0);
+		err = sem_wait(&Buf2Dev);
+		assert(err == 0);
 		if (Terminate) {
 			debugmsg("outputThread: terminating upon termination request...\n");
 			if (-1 == close(Out)) 
@@ -704,7 +791,8 @@ static void *outputThread(void *ignored)
 		}
 		if (Finish) {
 			debugmsg("outputThread: inputThread finished, %d blocks remaining\n",fill);
-			sem_getvalue(&Buf2Dev,&fill);
+			err = sem_getvalue(&Buf2Dev,&fill);
+			assert(err == 0);
 			if ((0 == Rest) && (0 == fill)) {
 				infomsg("outputThread: finished - exiting...\n");
 				pthread_exit((void *) 0);
@@ -713,72 +801,69 @@ static void *outputThread(void *ignored)
 				debugmsg("outputThread: last block has %d bytes\n",Rest);
 			}
 		}
+		/* switch output volume if -D <size> has been reached */
+		if ( (OutVolsize != 0) && (Numout > 0) && (Numout % (OutVolsize/Blocksize)) == 0 ) {
+			/* Sleep to let status thread "catch up" so that the displayed total is a multiple of OutVolsize */
+			(void) mt_usleep(500000);
+			requestOutputVolume();
+		}
 		do {
 			/* use Outsize which could be the blocksize of the device (option -d) */
-			int err;
+			int num;
 #ifdef HAVE_SENDFILE
 			if (Sendout) {
 				off_t baddr = (off_t) Buffer[at] + blocksize - rest;
-				err = sendfile(Out,SFV_FD_SELF,&baddr,rest > Outsize ? Outsize : rest);
+				num = sendfile(Out,SFV_FD_SELF,&baddr,rest > Outsize ? Outsize : rest);
 #ifdef DEBUG
-				debugmsg("outputThread: sendfile(Out, SFV_FD_SELF, Buffer[%d] + %llu, %llu) = %d\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, err);
+				debugmsg("outputThread: sendfile(Out, SFV_FD_SELF, Buffer[%d] + %llu, %llu) = %d\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, num);
 #endif
 			} else
 #endif
 			{
-				err = write(Out,Buffer[at] + blocksize - rest, rest > Outsize ? Outsize : rest);
+				num = write(Out,Buffer[at] + blocksize - rest, rest > Outsize ? Outsize : rest);
 #ifdef DEBUG
-				debugmsg("outputThread: write(Out, Buffer[%d] + %llu, %d) = %d\t(rest = %d)\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, err, rest);
+				debugmsg("outputThread: write(Out, Buffer[%d] + %llu, %d) = %d\t(rest = %d)\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, num, rest);
 #endif
 			}
-			if ((-1 == err) && (Terminal) && ((errno == ENOMEM) || (errno == ENOSPC))) {
+			if ((-1 == num) && (Terminal||Autoloader) && ((errno == ENOMEM) || (errno == ENOSPC))) {
 				/* request a new volume - but first check
 				 * wheather we are really at the
 				 * end of the device */
 				checkIncompleteOutput();
 				continue;
-			} else if (-1 == err) {
+			} else if (-1 == num) {
 				errormsg("outputThread: error writing at offset %llx: %s\n",Blocksize*Numout+blocksize-rest,strerror(errno));
 				Terminate = 1;
-				sem_post(&Dev2Buf);
+				err = sem_post(&Dev2Buf);
+				assert(err == 0);
 				pthread_exit((void *) -1);
 			}
-			rest -= err;
+			rest -= num;
 		} while (rest > 0);
-		sem_post(&Dev2Buf);
+		err = sem_post(&Dev2Buf);
+		assert(err == 0);
 		if (MaxWriteSpeed) {
 			xfer = enforceSpeedLimit(MaxWriteSpeed,xfer,&last);
 		}
 		if (Pause)
-			(void) usleep(Pause);
+			(void) mt_usleep(Pause);
 		at++;
 		if (Numblocks == at)
 			at = 0;
-		if (Finish) {
-			sem_getvalue(&Buf2Dev,&fill);
-			if (0 == fill) {
-				infomsg("outputThread: syncing...\n");
-				while (0 != fsync(Out)) {
-					if (errno == EINTR) {
-						continue;
-					} else if (errno == EINVAL) {
-						warningmsg("output does not support syncing: omitted.\n");
-						break;
-					} else {
-						fatal("error syncing: %s\n",strerror(errno));
-					}
-				}
-				infomsg("outputThread: finished - exiting...\n");
-				if (-1 == close(Out))
-					errormsg("error closing output: %s\n",strerror(errno));
-				pthread_exit(0);
-				return 0;	/* just for lint */
-			}
+		err = pthread_mutex_lock(&LowMut);
+		assert(err == 0);
+		err = sem_getvalue(&Buf2Dev,&fill);
+		assert(err == 0);
+		if (Finish && (0 == fill)) {
+			terminateOutputThread();
+			return 0;	/* make lint happy */
 		}
-		sem_getvalue(&Buf2Dev,&fill);
 		if ((startread < 1) && ((double)fill / (double)Numblocks) < startread) {
-			pthread_cond_signal(&PercLow);
+			err = pthread_cond_signal(&PercLow);
+			assert(err == 0);
 		}
+		err = pthread_mutex_unlock(&LowMut);
+		assert(err == 0);
 		Numout++;
 	}
 }
@@ -918,6 +1003,7 @@ static void usage(void)
 #ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 		"-d         : use blocksize of device for output\n"
 #endif
+		"-D <size>  : assumed device size (default: infinite)\n"
 		"-P <num>   : start writing after buffer has been filled more than <num>%%\n"
 		"-p <num>   : start reading after buffer has been filled less than <num>%%\n"
 		"-i <file>  : use <file> for input\n"
@@ -1027,7 +1113,7 @@ int main(int argc, const char **argv)
 	progname = basename(argv0);
 	PrefixLen = strlen(progname) + 2;
 	Msg = malloc(PrefixLen + MSGSIZE);
-	strcpy(Msg,progname);
+	(void) strcpy(Msg,progname);
 	Msg[PrefixLen - 2] = ':';
 	Msg[PrefixLen - 1] = ' ';
 	Msgbuf = Msg + PrefixLen;
@@ -1174,6 +1260,9 @@ int main(int argc, const char **argv)
 #else
 			warningmsg("md5 hash support has not been compiled in!");
 #endif
+		} else if (!argcheck("-D",argv,&c)) {
+			OutVolsize = calcint(argv,c,0);
+			debugmsg("OutVolsize = %llu\n",OutVolsize);
 		} else
 			fatal("unknown option \"%s\"\n",argv[c]);
 	}
@@ -1210,6 +1299,14 @@ int main(int argc, const char **argv)
 	/* multi volume input consistency checking */
 	if ((Multivolume) && (!Infile))
 		fatal("multi volume support for input needs an explicit given input device (option -i)\n");
+
+	/* SPW: Volsize consistency checking */
+	if (OutVolsize && !Outfile)
+		fatal("Setting OutVolsize without an output device doesn't make sense!\n");
+	if ( (OutVolsize != 0) && (OutVolsize < Blocksize) )
+		/* code assumes we can write at least one block */
+		fatal("If non-zero, OutVolsize must be at least as large as the buffer blocksize (%llu)!\n",Blocksize);
+	/* SPW END */
 
 	/* check that we stay within system limits */
 	mxnrsem = sysconf(_SC_SEM_VALUE_MAX);
@@ -1354,7 +1451,8 @@ int main(int argc, const char **argv)
 		warningmsg("error registering new SIGINT handler: %s\n",strerror(errno));
 
 	debugmsg("starting threads...\n");
-	sigfillset(&signalSet);
+	err = sigfillset(&signalSet);
+	assert(0 == err);
 	(void) pthread_sigmask(SIG_BLOCK, &signalSet, NULL);
 	err = pthread_create(&Writer,0,&outputThread,0);
 	assert(0 == err);

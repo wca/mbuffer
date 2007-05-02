@@ -18,6 +18,8 @@ OBJECTS		= $(SOURCES:.c=.o)
 
 all: $(TARGET)
 
+$(OBJECTS): config.h
+
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) $(LDFLAGS) $(LIBS) $(OBJECTS) -o $@
 
