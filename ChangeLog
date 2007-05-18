@@ -1,3 +1,9 @@
+20070518:
+- bugfix: misplaced ifdef could lead to failures for options -d and -b
+  on systems that do not support device block size determination
+- fixed possible hang on SIGINT without status thread
+- write summary to stderr if no tty is available
+
 20070502:
 - added support for setting the output device's volume size explicitly
   (patch by Sean Walmsley)

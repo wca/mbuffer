@@ -267,7 +267,7 @@ static void summary(unsigned long long numb, double secs)
 		*msg++ = '\n';
 	}
 #endif
-	(void) write(Tty,buf,strlen(buf));
+	(void) write(Tty != -1 ? Tty : STDERR_FILENO,buf,strlen(buf));
 }
 
 
@@ -316,7 +316,6 @@ static void statusThread(void)
 	int unwritten = 1;	/* assumption: initially there is at least one unwritten block */
 	int ret;
 
-	(void) gettimeofday(&Starttime,0);
 	last = Starttime;
 #ifdef __alpha
 	(void) mt_usleep(1000);	/* needed on alpha (stderr fails with fpe on nan) */
@@ -551,6 +550,7 @@ static void *inputThread(void *ignored)
 		err = sem_wait(&Dev2Buf); /* Wait for one or more buffer blocks to be free */
 		assert(err == 0);
 		if (Terminate) {	/* for async termination requests */
+			(void) pthread_cancel(Writer);
 			
 			debugmsg("inputThread: terminating upon termination request...\n");
 			if (-1 == close(In))
@@ -784,6 +784,7 @@ static void *outputThread(void *ignored)
 		err = sem_wait(&Buf2Dev);
 		assert(err == 0);
 		if (Terminate) {
+			(void) pthread_cancel(Reader);
 			debugmsg("outputThread: terminating upon termination request...\n");
 			if (-1 == close(Out)) 
 				errormsg("error closing output: %s\n",strerror(errno));;
@@ -1142,8 +1143,8 @@ int main(int argc, const char **argv)
 			Numblocks = (atoi(argv[c])) ? ((unsigned long long) atoll(argv[c])) : Numblocks;
 			optBset = 1;
 			debugmsg("Numblocks = %llu\n",Numblocks);
-#ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 		} else if (!argcheck("-d",argv,&c)) {
+#ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 			setOutsize = 1;
 			debugmsg("setting output size according to the blocksize of the device\n");
 #else
@@ -1451,6 +1452,7 @@ int main(int argc, const char **argv)
 		warningmsg("error registering new SIGINT handler: %s\n",strerror(errno));
 
 	debugmsg("starting threads...\n");
+	(void) gettimeofday(&Starttime,0);
 	err = sigfillset(&signalSet);
 	assert(0 == err);
 	(void) pthread_sigmask(SIG_BLOCK, &signalSet, NULL);
@@ -1462,8 +1464,14 @@ int main(int argc, const char **argv)
 	if (Status)
 		statusThread();
 	else {
+		struct timeval now;
+		double diff;
+
 		(void) pthread_join(Reader,0);
 		(void) pthread_join(Writer,0);
+		(void) gettimeofday(&now,0);
+		diff = now.tv_sec - Starttime.tv_sec + (double) now.tv_usec / 1000000 - (double) Starttime.tv_usec / 1000000;
+		summary(Numout * Blocksize + Rest, diff);
 	}
 	return 0;
 }

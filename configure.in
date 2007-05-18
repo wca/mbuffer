@@ -4,7 +4,7 @@ AC_CONFIG_HEADER(config.h)
 AC_CANONICAL_SYSTEM
 
 PACKAGE=mbuffer
-VERSION=20070502
+VERSION=20070518
 
 AC_PREFIX_DEFAULT(/usr/local)
 test "$prefix" = NONE && prefix=/usr/local
