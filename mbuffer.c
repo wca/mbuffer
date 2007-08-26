@@ -40,7 +40,7 @@
 #include <mhash.h>
 #elif defined HAVE_LIBMD5
 #include <md5.h>
-#elif defined HAVE_LIBSSL
+#elif defined HAVE_LIBCRYPTO
 #include <openssl/md5.h>
 #endif
 
@@ -75,7 +75,7 @@ static long Verbose = 3, In = 0, Out = 0, Tmp = 0, Pause = 0, Memmap = 0,
 	Autoloader = 0, Autoload_time = 0, Sock = 0, OptSync = 0,
 	ErrorOccured = 0;
 static unsigned long Outsize = 10240;
-#if defined HAVE_LIBSSL || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
+#if defined HAVE_LIBCRYPTO || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
 static long  Hash = 0;
 #endif
 static volatile int Finish = 0, Terminate = 0;
@@ -91,7 +91,7 @@ static int Multivolume = 0, Memlock = 0, Sendout = 0, PrefixLen;
 static MHASH MD5hash;
 #elif defined HAVE_LIBMD5
 static MD5_CTX md5ctxt;
-#elif defined HAVE_LIBSSL
+#elif defined HAVE_LIBCRYPTO
 static MD5_CTX md5ctxt;
 #endif
 static sem_t Dev2Buf, Buf2Dev;
@@ -255,7 +255,7 @@ static void summary(unsigned long long numb, double secs)
 			msg += sprintf(msg," %02x",hashvalue[i]);
 		*msg++ = '\n';
 	}
-#elif defined HAVE_LIBSSL
+#elif defined HAVE_LIBCRYPTO
 	if (Hash) {
 		unsigned char hashvalue[16];
 		int i;
@@ -591,7 +591,7 @@ static void *inputThread(void *ignored)
 				#elif defined HAVE_LIBMD5
 				if (Hash)
 					MD5Update(&md5ctxt,(unsigned char *)Buffer[at],num);
-				#elif defined HAVE_LIBSSL
+				#elif defined HAVE_LIBCRYPTO
 				if (Hash)
 					MD5_Update(&md5ctxt,Buffer[at],num);
 				#endif
@@ -614,7 +614,7 @@ static void *inputThread(void *ignored)
 		#elif defined HAVE_LIBMD5
 		if (Hash)
 			MD5Update(&md5ctxt,(unsigned char *)Buffer[at],num);
-		#elif defined HAVE_LIBSSL
+		#elif defined HAVE_LIBCRYPTO
 		if (Hash)
 			MD5_Update(&md5ctxt,Buffer[at],num);
 		#endif
@@ -1025,7 +1025,7 @@ static void usage(void)
 		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"
 		"-q         : quiet - do not display the status on stderr\n"
 		"-c         : write with synchronous data integrity support\n"
-#if defined HAVE_LIBSSL || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
+#if defined HAVE_LIBCRYPTO || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
 		"-H\n"
 		"--md5      : generate md5 hash of transfered data\n"
 #endif
@@ -1255,7 +1255,7 @@ int main(int argc, const char **argv)
 #elif defined HAVE_LIBMD5
 			Hash = 1;
 			MD5Init(&md5ctxt);
-#elif defined HAVE_LIBSSL
+#elif defined HAVE_LIBCRYPTO
 			Hash = 1;
 			MD5_Init(&md5ctxt);
 #else

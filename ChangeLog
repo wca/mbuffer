@@ -1,3 +1,8 @@
+20070826:
+- bugfix: search for MD5 functions in libcrypto instead of libssl
+- bugfix: search for MD5 functions in libmd5 using different function
+          to avoid incorrect caching of results
+
 20070518:
 - bugfix: misplaced ifdef could lead to failures for options -d and -b
   on systems that do not support device block size determination
