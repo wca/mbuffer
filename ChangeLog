@@ -1,3 +1,6 @@
+20070911:
+- bugfix: search for MD5 functions with correct function names
+
 20070826:
 - bugfix: search for MD5 functions in libcrypto instead of libssl
 - bugfix: search for MD5 functions in libmd5 using different function

@@ -4,7 +4,7 @@ AC_CONFIG_HEADER(config.h)
 AC_CANONICAL_SYSTEM
 
 PACKAGE=mbuffer
-VERSION=20070826
+VERSION=20070911
 
 AC_PREFIX_DEFAULT(/usr/local)
 test "$prefix" = NONE && prefix=/usr/local
@@ -42,8 +42,8 @@ AC_ARG_ENABLE(md5,
 	,enable_md5=auto
 	)
 if test x$enable_md5 != xno ; then
-	AC_SEARCH_LIBS(MD5Init,crypto,AC_DEFINE_UNQUOTED(HAVE_LIBCRYPTO),
-	AC_SEARCH_LIBS(MD5Final,md5,AC_DEFINE_UNQUOTED(HAVE_LIBMD5),
+	AC_SEARCH_LIBS(MD5_Init,crypto,AC_DEFINE_UNQUOTED(HAVE_LIBCRYPTO),
+	AC_SEARCH_LIBS(MD5Init,md5,AC_DEFINE_UNQUOTED(HAVE_LIBMD5),
 	AC_SEARCH_LIBS(mhash_init,mhash,AC_DEFINE_UNQUOTED(HAVE_LIBMHASH),
 		if test x$enable_md5 = xauto ; then
 			AC_MSG_WARN(could not find a library containing the md5 hash functions - md5 support disabled)
