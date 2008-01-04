@@ -1,6 +1,6 @@
 /*
  * This file is licensed according to the GPLv2. See file LICENSE for details.
- * author: Thomas Maier-Komor
+ * Copyright 2000-2007, Thomas Maier-Komor
  */
 
 #include "config.h"
@@ -9,6 +9,8 @@
 #include <fcntl.h>
 #include <libgen.h>
 #include <limits.h>
+#include <malloc.h>
+#include <math.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <signal.h>
@@ -17,7 +19,6 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <string.h>
-#include <stropts.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -25,7 +26,9 @@
 #include <unistd.h>
 
 #ifdef HAVE_SENDFILE
+#ifdef HAVE_SENDFILE_H
 #include <sys/sendfile.h>
+#endif
 /* if this sendfile implementation does not support sending from buffers,
    disable sendfile support */
 	#ifndef SFV_FD_SELF
@@ -44,9 +47,13 @@
 #include <openssl/md5.h>
 #endif
 
-#ifndef _POSIX_THREADS
-#error posix threads are required
-#endif
+/*
+ * _POSIX_THREADS is only defined if full thread support is available.
+ * We don't need full thread support, so we skip this test...
+ * #ifndef _POSIX_THREADS
+ * #error posix threads are required
+ * #endif
+ */
 
 #ifndef _POSIX_SEMAPHORES
 #error posix sempahores are required
@@ -78,11 +85,13 @@ static unsigned long Outsize = 10240;
 #if defined HAVE_LIBCRYPTO || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
 static long  Hash = 0;
 #endif
-static volatile int Finish = 0, Terminate = 0;
+static volatile int
+	Finish = 0,	/* this is for graceful termination */
+	Terminate = 0;	/* abort execution, because of error or signal */
 static unsigned long long  Rest = 0, Blocksize = 10240, Numblocks = 256,
 	MaxReadSpeed = 0, MaxWriteSpeed = 0, OutVolsize = 0;
 static volatile unsigned long long Numin = 0, Numout = 0;
-static volatile int HighMark = 0, LowMark = 0;
+static volatile int EmptyCount = 0, FullCount = 0;
 static double StartWrite = 0, StartRead = 1;
 static char *Tmpfile = 0, **Buffer, *Msgbuf, *Msg;
 static const char *Infile = 0, *Outfile = 0, *Autoload_cmd = 0;
@@ -95,13 +104,15 @@ static MD5_CTX md5ctxt;
 static MD5_CTX md5ctxt;
 #endif
 static sem_t Dev2Buf, Buf2Dev;
-static pthread_cond_t PercLow = PTHREAD_COND_INITIALIZER,
-		      PercHigh = PTHREAD_COND_INITIALIZER;
-static pthread_mutex_t TermMut = PTHREAD_MUTEX_INITIALIZER,
-		       LowMut = PTHREAD_MUTEX_INITIALIZER,
-		       HighMut = PTHREAD_MUTEX_INITIALIZER;
-static int Log = -1, Tty = -1;
-static FILE *Terminal = 0;
+static pthread_cond_t
+	PercLow = PTHREAD_COND_INITIALIZER,	/* low watermark */
+	PercHigh = PTHREAD_COND_INITIALIZER;	/* high watermark */
+static pthread_mutex_t
+	TermMut = PTHREAD_MUTEX_INITIALIZER,	/* prevents statusThread from interfering with request*Volume */
+	LowMut = PTHREAD_MUTEX_INITIALIZER,
+	HighMut = PTHREAD_MUTEX_INITIALIZER;
+static int Log = -1;
+static int Terminal = 1;
 static struct timeval Starttime;
 
 
@@ -187,50 +198,51 @@ static void fatal(const char *msg, ...)
 
 
 
+static char *kb2str(double v)
+{
+	const char *dim = "kMGT", *f;
+	static char s[8];
+
+	while (v > 10000) {
+		v /= 1024.0;
+		++dim;
+		if (*dim == 0) {
+			v *= 1024.0*1024.0*1024.0*1024.0;
+			break;
+		}
+	}
+	if (v < 0)
+		f = " ??? ";
+	else if (v < 100)
+		f = "%4.1f %c";
+	else if (v < 10000) {
+		v = rint(v);
+		f = "%4.0f %c";
+	} else
+		f = "%5.lg ";
+	sprintf(s,f,v,*dim);
+	return s;
+}
+
+
+
 static void summary(unsigned long long numb, double secs)
 {
 	int h = (int) secs/3600, m = (int) (secs - h * 3600)/60;
-	double av = (double)numb/secs;
+	double av = (double)(numb >>= 10)/secs;
 	char buf[256], *msg = buf;
 	
 	secs -= m * 60 + h * 3600;
-	msg += sprintf(msg,"\nsummary: ");
-	if (numb < 10000ULL)
-		msg += sprintf(msg,"%llu Byte in ",numb);
-	else if (numb < 100*1024ULL)
-		msg += sprintf(msg,"%.1lf kB in ",(double)numb / 1024);
-	else if (numb < 10000*1024ULL)
-		msg += sprintf(msg,"%.0lf kB in ",(double)numb / 1024);
-	else if (numb < 100*1024*1024ULL)
-		msg += sprintf(msg,"%.1lf MB in ",(double)numb / (double)(1<<20));
-	else if (numb < 10000*1024*1024ULL)
-		msg += sprintf(msg,"%.0lf MB in ",(double)numb / (double)(1<<20));
-	else
-		msg += sprintf(msg,"%.1lf GB in ",(double)numb / (1<<30));
+	msg += sprintf(msg,"\nsummery: %sByte in ",kb2str(numb));
 	if (h)
 		msg += sprintf(msg,"%d h %02d min ",h,m);
 	else if (m)
 		msg += sprintf(msg,"%2d min ",m);
-	msg += sprintf(msg,"%02.1f sec - ",secs);
-	msg += sprintf(msg,"average of ");
-	if (av < 100)
-		msg += sprintf(msg,"%.1lf B/s",av);
-	else if (av < 10000)
-		msg += sprintf(msg,"%.0lf B/s",av);
-	else if (av < 100*1024)
-		msg += sprintf(msg,"%.1lf kB/s",av/1024);
-	else if (av < 10000*1024)
-		msg += sprintf(msg,"%.0lf kB/s",av/1024);
-	else if (av < 100*1024*1024)
-		msg += sprintf(msg,"%.1lf MB/s",av/1048576);
-	else if (av < 1E4*1024*1024)
-		msg += sprintf(msg,"%.0lf MB/s",av/1048576);
-	else
-		msg += sprintf(msg,"%.1lf GB/s",av/1073741824);	/* OK - this is really silly - at least now in 2003, yeah and still in 2005... */
-	if (LowMark)
-		msg += sprintf(msg,", %dx empty",LowMark);
-	if (HighMark)
-		msg += sprintf(msg,", %dx full",HighMark);
+	msg += sprintf(msg,"%02.1f sec - average of %sB/s",secs,kb2str(av));
+	if (EmptyCount)
+		msg += sprintf(msg,", %dx empty",EmptyCount);
+	if (FullCount)
+		msg += sprintf(msg,", %dx full",FullCount);
 	*msg++ = '\n';
 	*msg = 0;
 #ifdef HAVE_LIBMHASH
@@ -267,7 +279,7 @@ static void summary(unsigned long long numb, double secs)
 		*msg++ = '\n';
 	}
 #endif
-	(void) write(Tty != -1 ? Tty : STDERR_FILENO,buf,strlen(buf));
+	(void) write(STDERR_FILENO,buf,strlen(buf));
 }
 
 
@@ -321,61 +333,33 @@ static void statusThread(void)
 	(void) mt_usleep(1000);	/* needed on alpha (stderr fails with fpe on nan) */
 #endif
 	while (!(Finish && (unwritten == 0)) && (Terminate == 0)) {
-		int err;
-		char id = 'k', od = 'k', td = 'k', buf[256], *b = buf;
+		int err,nw;
+		char buf[256], *b = buf;
 		(void) mt_usleep(500000);
+		(void) gettimeofday(&now,0);
+		diff = now.tv_sec - last.tv_sec + (double) (now.tv_usec - last.tv_usec) / 1000000;
 		err = pthread_mutex_lock(&TermMut);
 		assert(0 == err);
 		err = sem_getvalue(&Buf2Dev,&unwritten);
 		assert(0 == err);
 		fill = (double)unwritten / (double)Numblocks * 100.0;
-		(void) gettimeofday(&now,0);
-		diff = now.tv_sec - last.tv_sec + (double) (now.tv_usec - last.tv_usec) / 1000000;
 		in = ((Numin - lin) * Blocksize) >> 10;
 		in /= diff;
-		if (in >= 10000) {
-			id = 'M';
-			in /= 1024;
-		}
 		out = ((Numout - lout) * Blocksize) >> 10;
 		out /= diff;
-		if (out >= 10000) {
-			od = 'M';
-			out /= 1024;
-		}
 		lin = Numin;
 		lout = Numout;
 		last = now;
 		total = (Numout * Blocksize) >> 10;
-		if (total >= 10000) {
-			td = 'M';
-			total /= 1024;
-		}
-		if (total >= 10000) {
-			td = 'G';
-			total /= 1024;
-		}
-		if (total >= 10000) {
-			td = 'T';
-			total /= 1024;
-		}
 		fill = (fill < 0) ? 0 : fill;
-		if (in < 100)
-			b += sprintf(b,"\rin @ %4.1lf %cB/s",in,id);
-		else
-			b += sprintf(b,"\rin @ %4.0lf %cB/s",in,id);
-		if (out < 100)
-			b += sprintf(b,", out @ %4.1lf %cB/s",out,od);
-		else
-			b += sprintf(b,", out @ %4.0lf %cB/s",out,od);
-		if (total < 100)
-			b += sprintf(b,", %4.1lf %cB total",total,td);
-		else
-			b += sprintf(b,", %4.0lf %cB total",total,td);
-		(void) sprintf(b,", buffer %3.0lf%% full",fill);
-		(void) write(Tty,buf,strlen(buf));
+		b += sprintf(b,"\rin @ %sB/s",kb2str(in));
+		b += sprintf(b,", out @ %sB/s",kb2str(out));
+		b += sprintf(b,", %sB total, buffer %3.0f%% full",kb2str(total),fill);
+		nw = write(STDERR_FILENO,buf,strlen(buf));
 		err = pthread_mutex_unlock(&TermMut);
 		assert(0 == err);
+		if (nw == -1)	/* stop trying to print status messages after a write error */
+			break;
 	}
 	if (Terminate) {
 		infomsg("\nterminating...\n");
@@ -395,9 +379,6 @@ static void statusThread(void)
 	(void) gettimeofday(&now,0);
 	diff = now.tv_sec - Starttime.tv_sec + (double) now.tv_usec / 1000000 - (double) Starttime.tv_usec / 1000000;
 	summary(Numout * Blocksize + Rest, diff);
-	if (ErrorOccured)
-		exit(EXIT_FAILURE);
-	exit(EXIT_SUCCESS);
 }
 
 
@@ -488,18 +469,21 @@ static void requestInputVolume(void)
 				(void) sleep(Autoload_time);
 		} else {
 			int err;
-			if (Terminal == 0) {
-				errormsg("End of volume, but not end of input.\n"
-					"Specify an autoload command, if you are working without terminal.\n");
-				Finish = 1;
-				pthread_exit((void *) -1);
-			}
+			char c = 0, msg[] = "\ninsert next volume and press return to continue...";
 			err = pthread_mutex_lock(&TermMut);
 			assert(0 == err);
-			(void) fprintf(Terminal,"\ninsert next volume and press return to continue...");
-			(void) fflush(Terminal);
-			(void) tcflush(fileno(Terminal),TCIFLUSH);
-			(void) fgetc(Terminal);
+			if (-1 == write(STDERR_FILENO,msg,sizeof(msg))) {
+				errormsg("error accessing controlling terminal for manual volume change request: %s\nConsider using autoload option, when running mbuffer without terminal.\n",strerror(errno));
+				Terminate = 1;
+				pthread_exit((void *) -1);
+			}
+			do {
+				if (-1 == read(STDERR_FILENO,&c,1) && (errno != EINTR)) {
+					errormsg("error accessing controlling terminal for manual volume change request: %s\nConsider using autoload option, when running mbuffer without terminal.\n",strerror(errno));
+					Terminate = 1;
+					pthread_exit((void *) -1);
+				}
+			} while (c != '\n');
 			err = pthread_mutex_unlock(&TermMut);
 			assert(0 == err);
 		}
@@ -508,13 +492,8 @@ static void requestInputVolume(void)
 	} while (In == -1);
 	Multivolume--;
 	if (Terminal && ! Autoloader) {
-		int err;
-		err = pthread_mutex_lock(&TermMut);
-		assert(0 == err);
-		(void) fprintf(Terminal,"\nOK - continuing...\n");
-		(void) fflush(Terminal);
-		err = pthread_mutex_unlock(&TermMut);
-		assert(0 == err);
+		char msg[] = "\nOK - continuing...\n";
+		(void) write(STDERR_FILENO,msg,sizeof(msg));
 	}
 }
 
@@ -542,7 +521,7 @@ static void *inputThread(void *ignored)
 			debugmsg("inputThread: buffer full, waiting for it to drain.\n");
 			err = pthread_cond_wait(&PercLow,&LowMut);
 			assert(err == 0);
-			++LowMark;
+			++FullCount;
 			debugmsg("inputThread: low watermark reached, continuing...\n");
 		}
 		err = pthread_mutex_unlock(&LowMut);
@@ -580,10 +559,11 @@ static void *inputThread(void *ignored)
 				err = pthread_mutex_unlock(&HighMut);
 				assert(err == 0);
 				infomsg("inputThread: exiting...\n");
-				pthread_exit((void *) 0);
+				pthread_exit((void *) -1);
 			} else if (0 == in) {
 				Rest = num;
-				Finish = 1;
+				err = sem_post(&Buf2Dev);
+				assert(err == 0);
 				debugmsg("inputThread: last block has %d bytes\n",num);
 				#ifdef HAVE_LIBMHASH
 				if (Hash)
@@ -595,8 +575,7 @@ static void *inputThread(void *ignored)
 				if (Hash)
 					MD5_Update(&md5ctxt,Buffer[at],num);
 				#endif
-				err = sem_post(&Buf2Dev);
-				assert(err == 0);
+				Finish = 1;
 				err = pthread_mutex_lock(&HighMut);
 				assert(err == 0);
 				err = pthread_cond_signal(&PercHigh);
@@ -610,7 +589,7 @@ static void *inputThread(void *ignored)
 		} while (num < Blocksize);
 		#ifdef HAVE_LIBMHASH
 		if (Hash)
-			mhash(MD5hash,Buffer[at],Blocksize);
+			mhash(MD5hash,Buffer[at],num);
 		#elif defined HAVE_LIBMD5
 		if (Hash)
 			MD5Update(&md5ctxt,(unsigned char *)Buffer[at],num);
@@ -646,7 +625,7 @@ static void requestOutputVolume(void)
 	if (!Outfile) {
 		errormsg("End of volume, but not end of input:\n"
 			"Output file must be given (option -o) for multi volume support!\n");
-		Finish = 1;
+		Terminate = 1;
 		pthread_exit((void *) -1);
 	}
 	debugmsg("requesting new output volume\n");
@@ -673,17 +652,27 @@ static void requestOutputVolume(void)
 				(void) sleep(Autoload_time);
 		} else {
 			int err;
+			char c = 0, msg[] = "\nvolume full - insert new media and press return when ready...\n";
 			if (Terminal == 0) {
 				errormsg("End of volume, but not end of input.\n"
 					"Specify an autoload command, if you are working without terminal.\n");
-				Finish = 1;
+				Terminate = 1;
 				pthread_exit((void *) -1);
 			}
 			err = pthread_mutex_lock(&TermMut);
 			assert(0 == err);
-			(void) fprintf(Terminal,"\nvolume full - insert new media and press return when ready...\n");
-			(void) tcflush(fileno(Terminal),TCIFLUSH);
-			(void) fgetc(Terminal);
+			if (-1 == write(STDERR_FILENO,msg,sizeof(msg))) {
+				errormsg("error accessing controlling terminal for manual volume change request: %s\nConsider using autoload option, when running mbuffer without terminal.\n",strerror(errno));
+				Terminate = 1;
+				pthread_exit((void *) -1);
+			}
+			do {
+				if (-1 == read(STDERR_FILENO,&c,1) && (errno != EINTR)) {
+					errormsg("error accessing controlling terminal for manual volume change request: %s\nConsider using autoload option, when running mbuffer without terminal.\n",strerror(errno));
+					Terminate = 1;
+					pthread_exit((void *) -1);
+				}
+			} while (c != '\n');
 			err = pthread_mutex_unlock(&TermMut);
 			assert(0 == err);
 		}
@@ -696,13 +685,8 @@ static void requestOutputVolume(void)
 	} while (-1 == Out);
 	infomsg("continuing with next volume\n");
 	if (Terminal && ! Autoloader) {
-		int err;
-		err = pthread_mutex_lock(&TermMut);
-		assert(0 == err);
-		(void) fprintf(Terminal,"\nOK - continuing...\n");
-		(void) fflush(Terminal);
-		err = pthread_mutex_unlock(&TermMut);
-		assert(0 == err);
+		char msg[] = "\nOK - continuing...\n";
+		(void) write(STDERR_FILENO,msg,sizeof(msg));
 	}
 }
 
@@ -776,7 +760,7 @@ static void *outputThread(void *ignored)
 			debugmsg("outputThread: buffer empty, waiting for it to fill\n");
 			err = pthread_cond_wait(&PercHigh,&HighMut);
 			assert(err == 0);
-			++HighMark;
+			++EmptyCount;
 			debugmsg("outputThread: high watermark reached, continuing...\n");
 		}
 		err = pthread_mutex_unlock(&HighMut);
@@ -796,7 +780,7 @@ static void *outputThread(void *ignored)
 			assert(err == 0);
 			if ((0 == Rest) && (0 == fill)) {
 				infomsg("outputThread: finished - exiting...\n");
-				pthread_exit((void *) 0);
+				pthread_exit(0);
 			} else if (0 == fill) {
 				blocksize = rest = Rest;
 				debugmsg("outputThread: last block has %d bytes\n",Rest);
@@ -889,7 +873,11 @@ static void openNetworkInput(const char *host, unsigned short port)
 	if (host) {
 		debugmsg("resolving hostname of input interface...\n");
 		if (0 == (h = gethostbyname(host)))
+#ifdef HAVE_HSTRERROR
 			fatal("could not resolve server hostname: %s\n",hstrerror(h_errno));
+#else
+			fatal("could not resolve server hostname: error code %d\n",h_errno);
+#endif
 	}
 	bzero((void *) &saddr, sizeof(saddr));
 	saddr.sin_family = AF_INET;
@@ -943,7 +931,11 @@ static void openNetworkOutput(const char *host, unsigned short port)
 	saddr.sin_port = htons(port);
 	infomsg("resolving server host...\n");
 	if (0 == (h = gethostbyname(host)))
+#ifdef HAVE_HSTRERROR
 		fatal("could not resolve server hostname: %s\n",hstrerror(h_errno));
+#else
+		fatal("could not resolve server hostname: error code %d\n",h_errno);
+#endif
 	saddr.sin_family = h->h_addrtype;
 	assert(h->h_length <= sizeof(saddr.sin_addr));
 	(void) memcpy(&saddr.sin_addr,h->h_addr_list[0],h->h_length);
@@ -997,8 +989,10 @@ static void usage(void)
 		"Options:\n"
 		"-b <num>   : use <num> blocks for buffer (default %llu)\n"
 		"-s <size>  : use block of <size> bytes for buffer (default %llu)\n"
+#ifdef _SC_PHYS_PAGES
 		"-m <size>  : use buffer of a total of <size> bytes\n"
-#ifdef _POSIX_MEMLOCK
+#endif
+#ifdef _POSIX_MEMLOCK_RANGE
 		"-L         : lock buffer in memory (unusable with file based buffers)\n"
 #endif
 #ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
@@ -1098,9 +1092,8 @@ static int argcheck(const char *opt, const char **argv, int *c)
 int main(int argc, const char **argv)
 {
 	unsigned long long totalmem = 0;
-	unsigned u;
 	long mxnrsem;
-	int err, optMset = 0, optSset = 0, optBset = 0, c;
+	int err, optMset = 0, optSset = 0, optBset = 0, c, fl;
 	sigset_t       signalSet;
 #ifdef HAVE_ST_BLKSIZE
 	struct stat st;
@@ -1126,6 +1119,7 @@ int main(int argc, const char **argv)
 			debugmsg("Blocksize = %llu\n",Blocksize);
 			if (Blocksize < 100)
 				fatal("cannot set blocksize as percentage of total physical memory\n");
+#ifdef _SC_PHYS_PAGES
 		} else if (!argcheck("-m",argv,&c)) {
 			totalmem = calcint(argv,c,totalmem);
 			optMset = 1;
@@ -1134,11 +1128,12 @@ int main(int argc, const char **argv)
 				pgsz = sysconf(_SC_PAGESIZE);
 				assert(pgsz > 0);
 				nump = sysconf(_SC_PHYS_PAGES);
-				assert(pgsz > 0);
+				assert(nump > 0);
 				debugmsg("total # of phys pages: %li (pagesize %li)\n",nump,pgsz);
 				totalmem = ((unsigned long long) nump * pgsz * totalmem) / 100 ;
 			}
 			debugmsg("totalmem = %llu\n",totalmem);
+#endif
 		} else if (!argcheck("-b",argv,&c)) {
 			Numblocks = (atoi(argv[c])) ? ((unsigned long long) atoll(argv[c])) : Numblocks;
 			optBset = 1;
@@ -1233,7 +1228,7 @@ int main(int argc, const char **argv)
 			if ((StartRead >= 1) || (StartRead < 0))
 				fatal("error in argument -p: must be bigger or equal to 0 and less than 100");
 			debugmsg("StartRead = %1.2lf\n",StartRead);
-#ifdef _POSIX_MEMLOCK
+#ifdef _POSIX_MEMLOCK_RANGE
 		} else if (!strcmp("-L",argv[c])) {
 			if (Tmpfile == 0)
 				Memlock = 1;
@@ -1319,7 +1314,7 @@ int main(int argc, const char **argv)
 	if (Blocksize * Numblocks > SSIZE_MAX)
 		fatal("Cannot address so much memory (%lld*%lld=%lld>%lld).\n",Blocksize,Numblocks, Blocksize*Numblocks,SSIZE_MAX);
 	/* create buffer */
-	Buffer = (char **) valloc(Numblocks * sizeof(char *));
+	Buffer = (char **) memalign(sysconf(_SC_PAGESIZE),Numblocks * sizeof(char *));
 	if (!Buffer)
 		fatal("Could not allocate enough memory: %s\n",strerror(errno));
 	if (Memmap) {
@@ -1358,14 +1353,17 @@ int main(int argc, const char **argv)
 		if (Buffer[0] == 0)
 			fatal("Could not allocate enough memory: %s\n",strerror(errno));
 	}
-	for (u = 1; u < Numblocks; u++) {
-		Buffer[u] = Buffer[0] + Blocksize * u;
-		*Buffer[u] = 0;	/* touch every block before locking */
+	for (c = 1; c < Numblocks; c++) {
+		Buffer[c] = Buffer[0] + Blocksize * c;
+		*Buffer[c] = 0;	/* touch every block before locking */
 	}
 
-#ifdef _POSIX_MEMLOCK
+#ifdef _POSIX_MEMLOCK_RANGE
 	if (Memlock) {
 		uid_t uid;
+#ifndef HAVE_SETEUID
+#define seteuid setuid
+#endif
 		uid = geteuid();
 		if (0 != seteuid(0))
 			warningmsg("could not change to uid 0 to lock memory (is mbuffer setuid root?)\n");
@@ -1429,21 +1427,24 @@ int main(int argc, const char **argv)
 		   "This can result in incorrect written data when\n"
 		   "using multiple volumes. Continue at your own risk!\n");
 #endif
-
-	debugmsg("accessing terminal...\n");
-	Terminal = fopen("/dev/tty","r+");
-	if (Terminal == 0) {
-		warningmsg("could not open terminal: %s\n",strerror(errno));
-		if (Multivolume && (Autoloader == 0))
-			fatal("Manual multivolume support only works with a controlling terminal.\n");
-		warningmsg("Disabled manual multivolume support and display of throughput.\n");
+	debugmsg("checking if we have a controlling terminal...\n");
+	fl = fcntl(STDERR_FILENO,F_GETFL);
+	err = fcntl(STDERR_FILENO,F_SETFL,fl | O_NONBLOCK);
+	assert(err == 0);
+	if ((read(STDERR_FILENO,&c,1) == -1) && (errno != EAGAIN)) {
+		int tty = open("/dev/tty",O_RDWR);
+		if (-1 == tty) {
+			Terminal = 0;
+			if (Autoloader == 0)
+				warningmsg("No controlling terminal and no autoloader command specified.\n");
+		} else {
+			Terminal = 1;
+			err = dup2(tty,STDERR_FILENO);
+			assert(err == 0);
+		}
 	}
-	Tty = open("/dev/tty",O_RDWR);
-	if ((Tty == -1) && (Status != 0)) {
-		warningmsg("could not open /dev/tty: %s\n",strerror(errno));
-		warningmsg("disabling display of throughput\n");
-		Status = 0;
-	}
+	err = fcntl(STDERR_FILENO,F_SETFL,fl);
+	assert(err == 0);
 
 	debugmsg("registering signals...\n");
 	if (SIG_ERR == signal(SIGINT,sigHandler))
@@ -1473,7 +1474,9 @@ int main(int argc, const char **argv)
 		diff = now.tv_sec - Starttime.tv_sec + (double) now.tv_usec / 1000000 - (double) Starttime.tv_usec / 1000000;
 		summary(Numout * Blocksize + Rest, diff);
 	}
-	return 0;
+	if (ErrorOccured)
+		exit(EXIT_FAILURE);
+	exit(EXIT_SUCCESS);
 }
 
 /* vim:tw=0

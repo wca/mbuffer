@@ -1,11 +1,12 @@
 CC		= @CC@
 DEFS		= @DEFS@
-CFLAGS		= @CFLAGS@ -O $(DEFS)
+CFLAGS		= @CFLAGS@ $(DEFS)
 LDFLAGS		= @LDFLAGS@
 LIBS		= @LIBS@
 
 prefix		= @prefix@
 exec_prefix     = @exec_prefix@
+datarootdir	= @datarootdir@
 bindir          = @bindir@
 mandir		= @mandir@/man1
 
@@ -33,4 +34,4 @@ distclean: clean
 install: $(TARGET)
 	-$(INSTALL) -d $(DESTDIR)$(bindir)
 	$(INSTALL) $(TARGET) $(DESTDIR)$(bindir)
-	$(INSTALL) mbuffer.1 $(DESTDIR)$(mandir)
+	$(INSTALL) mbuffer.1 $(mandir)

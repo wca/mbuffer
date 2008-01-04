@@ -1,3 +1,12 @@
+20080104:
+- updated status display
+- POSIX conformance update: read from stderr instead of relying on
+  /dev/tty exists, fallback to /dev/tty if stderr is unreadable
+- update to build on HPUX.11 (thanks go to testdrive.hp.com)
+- several configure fixes and updates
+- fixed invalid exitcode without console (Alex Kramarov)
+- correction for full/empty report
+
 20070911:
 - bugfix: search for MD5 functions with correct function names
 
