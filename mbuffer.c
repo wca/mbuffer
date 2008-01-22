@@ -1440,7 +1440,7 @@ int main(int argc, const char **argv)
 		} else {
 			Terminal = 1;
 			err = dup2(tty,STDERR_FILENO);
-			assert(err == 0);
+			assert(err != -1);
 		}
 	}
 	err = fcntl(STDERR_FILENO,F_SETFL,fl);

@@ -1,3 +1,8 @@
+20080122:
+- fix wrong assertion on dup2
+- fix 'make distclean' to also remove mbuffer.exe
+- fix installation of manpage
+
 20080104:
 - updated status display
 - POSIX conformance update: read from stderr instead of relying on
