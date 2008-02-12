@@ -5,7 +5,7 @@ AC_CANONICAL_SYSTEM
 AC_EXEEXT
 
 PACKAGE=mbuffer
-VERSION=20080122
+VERSION=20080212
 
 AC_PREFIX_DEFAULT(/usr/local)
 test "$prefix" = NONE && prefix=/usr/local

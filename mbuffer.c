@@ -546,12 +546,12 @@ static void *inputThread(void *ignored)
 				requestInputVolume();
 			} else if (-1 == in) {
 				errormsg("inputThread: error reading at offset %llx: %s\n",Numin*Blocksize,strerror(errno));
+				Finish = 1;
 				if (num) {
 					Rest = num;
 					err = sem_post(&Buf2Dev);
 					assert(err == 0);
 				}
-				Finish = 1;
 				err = pthread_mutex_lock(&HighMut);
 				assert(err == 0);
 				err = pthread_cond_signal(&PercHigh);
@@ -562,6 +562,7 @@ static void *inputThread(void *ignored)
 				pthread_exit((void *) -1);
 			} else if (0 == in) {
 				Rest = num;
+				Finish = 1;
 				err = sem_post(&Buf2Dev);
 				assert(err == 0);
 				debugmsg("inputThread: last block has %d bytes\n",num);
@@ -575,7 +576,6 @@ static void *inputThread(void *ignored)
 				if (Hash)
 					MD5_Update(&md5ctxt,Buffer[at],num);
 				#endif
-				Finish = 1;
 				err = pthread_mutex_lock(&HighMut);
 				assert(err == 0);
 				err = pthread_cond_signal(&PercHigh);
@@ -584,7 +584,7 @@ static void *inputThread(void *ignored)
 				assert(err == 0);
 				infomsg("inputThread: exiting...\n");
 				pthread_exit(0);
-			} 
+			}
 			num += in;
 		} while (num < Blocksize);
 		#ifdef HAVE_LIBMHASH

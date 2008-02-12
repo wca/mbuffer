@@ -1,3 +1,6 @@
+20080212:
+- fixed a race-condition causing incorrectly written last block
+
 20080122:
 - fix wrong assertion on dup2
 - fix 'make distclean' to also remove mbuffer.exe
