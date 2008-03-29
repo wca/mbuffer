@@ -1,6 +1,6 @@
 /*
  * This file is licensed according to the GPLv2. See file LICENSE for details.
- * Copyright 2000-2007, Thomas Maier-Komor
+ * Copyright 2000-2008, Thomas Maier-Komor
  */
 
 #include "config.h"
@@ -131,7 +131,7 @@ static void debugmsg(const char *msg, ...)
 	}
 }
 #else
-#define debugmsg(...)
+#define debugmsg
 #endif
 
 static void infomsg(const char *msg, ...)
@@ -233,7 +233,7 @@ static void summary(unsigned long long numb, double secs)
 	char buf[256], *msg = buf;
 	
 	secs -= m * 60 + h * 3600;
-	msg += sprintf(msg,"\nsummery: %sByte in ",kb2str(numb));
+	msg += sprintf(msg,"\nsummary: %sByte in ",kb2str(numb));
 	if (h)
 		msg += sprintf(msg,"%d h %02d min ",h,m);
 	else if (m)
@@ -382,7 +382,7 @@ static void statusThread(void)
 }
 
 
-static long long timediff(struct timeval *t1, struct timeval *t2)
+static inline long long timediff(struct timeval *restrict t1, struct timeval *restrict t2)
 {
 	long long tdiff;
 	tdiff = (t1->tv_sec - t2->tv_sec) * 1000000;
@@ -407,7 +407,7 @@ static long long enforceSpeedLimit(unsigned long long limit, long long num, stru
 	assert(tdiff >= 0);
 	if (num < 0)
 		return num;
-	dt = (double)tdiff / 1E6;
+	dt = (double)tdiff * 1E-6;
 	if (((double)num/dt) > (double)limit) {
 		double req = (double)num/limit - dt;
 		long long w = (long long) (req * 1E6);
@@ -489,6 +489,10 @@ static void requestInputVolume(void)
 		}
 		if (-1 == (In = open(Infile,O_RDONLY|LARGEFILE)))
 			errormsg("could not reopen input: %s\n",strerror(errno));
+#ifdef __sun
+		if (-1 == directio(In,DIRECTIO_ON))
+			infomsg("direct I/O hinting failed for input: %s\n",strerror(errno));
+#endif
 	} while (In == -1);
 	Multivolume--;
 	if (Terminal && ! Autoloader) {
@@ -679,8 +683,8 @@ static void requestOutputVolume(void)
 		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|OptSync|LARGEFILE,0666)))
 			errormsg("error reopening output file: %s\n",strerror(errno));
 #ifdef __sun
-		else if (-1 == directio(Out,DIRECTIO_ON))
-			infomsg("direct I/O hinting failed: %s\n",strerror(errno));
+		if (-1 == directio(Out,DIRECTIO_ON))
+			infomsg("direct I/O hinting failed for output: %s\n",strerror(errno));
 #endif
 	} while (-1 == Out);
 	infomsg("continuing with next volume\n");
@@ -953,7 +957,7 @@ static void getNetVars(const char **argv, int *c, const char **host, unsigned sh
 	tmphost = malloc(strlen(argv[*c] + 1));
 	if (0 == tmphost)
 		fatal("out of memory\n");
-	if (1 < sscanf(argv[*c],"%[0-9a-zA-Z.]:%hu",tmphost,port)) {
+	if (1 < sscanf(argv[*c],"%[0-9a-zA-Z_.-]:%hu",tmphost,port)) {
 		*host = tmphost;
 		return;
 	}
@@ -975,7 +979,7 @@ static void version(void)
 {
 	(void) fprintf(stderr,
 		"mbuffer version "VERSION"\n"\
-		"Copyright 2001-2006 - T. Maier-Komor\n"\
+		"Copyright 2001-2008 - T. Maier-Komor\n"\
 		"License: GPL2 - see file COPYING\n");
 	exit(EXIT_SUCCESS);
 }
@@ -1095,7 +1099,7 @@ int main(int argc, const char **argv)
 	long mxnrsem;
 	int err, optMset = 0, optSset = 0, optBset = 0, c, fl;
 	sigset_t       signalSet;
-#ifdef HAVE_ST_BLKSIZE
+#ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 	struct stat st;
 	int setOutsize = 0;
 #endif
@@ -1388,21 +1392,23 @@ int main(int argc, const char **argv)
 		openNetworkInput(client,netPortIn);
 	} else
 		In = fileno(stdin);
+#ifdef __sun
+	if (-1 == directio(In,DIRECTIO_ON))
+		infomsg("direct I/O hinting failed for input: %s\n",strerror(errno));
+#endif
 	if (Outfile) {
 		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|OptSync,0666)))
 			fatal("could not open output file: %s\n",strerror(errno));
-		/*
-#ifdef __sun
-		else if (-1 == directio(Out,DIRECTIO_ON))
-			debugmsg("direct I/O hinting failed: %s\n",strerror(errno));
-#endif
-*/
 	} else if (netPortOut) {
 		openNetworkOutput(server,netPortOut);
 	} else
 		Out = fileno(stdout);
+#ifdef __sun
+	if (-1 == directio(Out,DIRECTIO_ON))
+		infomsg("direct I/O hinting failed for output: %s\n",strerror(errno));
+#endif
 
-#ifdef HAVE_ST_BLKSIZE
+#ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 	debugmsg("checking output device...\n");
 	if (-1 == fstat(Out,&st))
 		fatal("could not stat output: %s\n",strerror(errno));

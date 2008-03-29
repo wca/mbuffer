@@ -1,3 +1,12 @@
+20080329:
+- configure should check if ST_BLKSIZE feature is available
+- compile with -O instead of -g per default
+- hostnames may have underscores and/or dash
+- orthographic fix
+- use inline and restrict if available
+- honor --disable-assert
+- use directio for input, too
+
 20080212:
 - fixed a race-condition causing incorrectly written last block
 
