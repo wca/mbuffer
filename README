@@ -1,7 +1,8 @@
 m(easuring) buffer
 ==================
-AUTHOR: Thomas Maier-Komor
-e-mail: software@maier-komor.de
+AUTHOR:		Thomas Maier-Komor
+e-mail:		software@maier-komor.de
+homepage:	http://www.maier-komor.de/mbuffer.html
 
 
 LICENSE:
@@ -20,7 +21,6 @@ mbuffer is a raplacement for buffer with additional functionality:
 # auto-loader support
 # network support
 # buffer compatible command-line options
-# --? bugs to hunt ?-- :-(
 
 
 NETWORKING:
@@ -64,13 +64,12 @@ If the total buffer size is 2GB or larger, you will need to compile
 mbuffer as a 64bit executable. This requires that you have a 64bit
 processor. Compiling with gcc you will need to pass -m64 as CFLAGS
 to configure. E.g.:
-CFLAGS="-O -g -m64" ./configure
+env CFLAGS="-O -g -m64" ./configure
 For Sun's Studio Compiler the equivalent flag is -xarch=v9.
 
 
 TODO:
 =====
-# fix: warnings for tru64 compilation
 # fix: unknown bugs
 
 

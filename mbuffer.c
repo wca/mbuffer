@@ -636,7 +636,8 @@ static void requestOutputVolume(void)
 	if (-1 == close(Out))
 		errormsg("error closing output: %s\n",strerror(errno));
 	do {
-		if ((Autoloader) && (Outfile)) {
+		mode_t mode;
+		if (Autoloader) {
 			const char default_cmd[] = "mt -f %s offline";
 			char cmd_buf[sizeof(default_cmd)+strlen(Outfile)];
 			const char *cmd = Autoload_cmd;
@@ -680,7 +681,10 @@ static void requestOutputVolume(void)
 			err = pthread_mutex_unlock(&TermMut);
 			assert(0 == err);
 		}
-		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|OptSync|LARGEFILE,0666)))
+		mode = O_WRONLY|O_TRUNC|OptSync|LARGEFILE;
+		if (strncmp(Outfile,"/dev/",5))
+			mode |= Nooverwrite|O_CREAT;
+		if (-1 == (Out = open(Outfile,mode,0666)))
 			errormsg("error reopening output file: %s\n",strerror(errno));
 #ifdef __sun
 		if (-1 == directio(Out,DIRECTIO_ON))
@@ -1194,7 +1198,7 @@ int main(int argc, const char **argv)
 			Memmap = 1;
 			debugmsg("mm = 1\n");
 		} else if (!argcheck("-l",argv,&c)) {
-			Log = open(argv[c],O_WRONLY|O_TRUNC|O_CREAT,0666);
+			Log = open(argv[c],O_WRONLY|O_TRUNC|O_CREAT|LARGEFILE,0666);
 			if (-1 == Log) {
 				Log = STDERR_FILENO;
 				errormsg("error opening log file: %s\n",strerror(errno));
@@ -1234,10 +1238,7 @@ int main(int argc, const char **argv)
 			debugmsg("StartRead = %1.2lf\n",StartRead);
 #ifdef _POSIX_MEMLOCK_RANGE
 		} else if (!strcmp("-L",argv[c])) {
-			if (Tmpfile == 0)
-				Memlock = 1;
-			else
-				warningmsg("cannot lock file based buffers in memory\n");
+			Memlock = 1;
 #endif
 		} else if (!strcmp("--help",argv[c]) || !strcmp("-h",argv[c])) {
 			usage();
@@ -1337,11 +1338,15 @@ int main(int argc, const char **argv)
 			(void) strcpy(Tmpfile,tfilename);
 			infomsg("tmpfile is %s\n",Tmpfile);
 		} else {
-			Tmp = open(Tmpfile,O_RDWR|O_CREAT|O_EXCL);
+			mode_t mode = O_RDWR | LARGEFILE;
+			if (strncmp(Tmpfile,"/dev/",5))
+				mode |= O_CREAT|O_EXCL;
+			Tmp = open(Tmpfile,mode,0600);
 		}
 		if (-1 == Tmp)
 			fatal("could not create temporary file (%s): %s\n",Tmpfile,strerror(errno));
-		(void) unlink(Tmpfile);
+		if (strncmp(Tmpfile,"/dev/",5))
+			(void) unlink(Tmpfile);
 		/* resize the file. Needed - at least under linux, who knows why? */
 		if (-1 == lseek(Tmp,Numblocks * Blocksize - sizeof(int),SEEK_SET))
 			fatal("could not resize temporary file: %s\n",strerror(errno));
@@ -1386,7 +1391,7 @@ int main(int argc, const char **argv)
 
 	debugmsg("opening streams...\n");
 	if (Infile) {
-		if (-1 == (In = open(Infile,O_RDONLY)))
+		if (-1 == (In = open(Infile,O_RDONLY|LARGEFILE)))
 			fatal("could not open input file: %s\n",strerror(errno));
 	} else if (netPortIn) {
 		openNetworkInput(client,netPortIn);
@@ -1397,7 +1402,10 @@ int main(int argc, const char **argv)
 		infomsg("direct I/O hinting failed for input: %s\n",strerror(errno));
 #endif
 	if (Outfile) {
-		if (-1 == (Out = open(Outfile,Nooverwrite|O_CREAT|O_WRONLY|O_TRUNC|OptSync,0666)))
+		mode_t mode = O_WRONLY|O_TRUNC|OptSync|LARGEFILE;
+		if (strncmp(Outfile,"/dev/",5))
+			mode |= Nooverwrite|O_CREAT;
+		if (-1 == (Out = open(Outfile,mode,0666)))
 			fatal("could not open output file: %s\n",strerror(errno));
 	} else if (netPortOut) {
 		openNetworkOutput(server,netPortOut);

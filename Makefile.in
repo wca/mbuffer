@@ -20,7 +20,7 @@ OBJECTS		= $(SOURCES:.c=.o)
 
 all: $(TARGET)
 
-$(OBJECTS): config.h
+$(OBJECTS): config.h Makefile
 
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) $(LDFLAGS) $(LIBS) $(OBJECTS) -o $@

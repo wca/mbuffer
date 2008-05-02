@@ -123,7 +123,7 @@ If TMPDIR is set, mbuffer allocates storage for file based buffers in this
 directory\&. If TMPDIR is unset \fI/var/tmp\fR will be used\&.
 .SH "FILES"
 .LP 
-\fI/usr/local/bin/mbuffer\fP 
+\fI$PREFIX/mbuffer\fP 
 .br 
 \fI/var/tmp/mbuffer-*\fP 
 .SH "EXAMPLES"
@@ -156,7 +156,8 @@ Making a backup via network:
 .SH "AUTHORS"
 .LP 
 Thomas Maier\-Komor <software@maier\-komor.de>
-
+.SH "HOMEPAGE"
+.LP http://www.maier-komor.de/mbuffer.html
 .SH "SEE ALSO"
 .LP 
 buffer(1), gpl(7)
