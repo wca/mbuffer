@@ -1,11 +1,18 @@
+20080507:
+- memory locking for file fails if -L is passed before -T
+- use MAP_SHARED instead of MAP_PRIVATE to simplify fork in system
+- missing arguments may cause a SegV
+- $(LIBS) should be after $(OBJECTS)
+
 20080502:
-- better support for device special files (files under /dev)
+- better support for device special files
+  (files under /dev shouldn't need -f to write to)
 - update to always handle largefile correctly
-- fix conifgure script for sendfile functionality
+- fix configure script for sendfile functionality
+- allow in-memory locking of file based buffers
 - minor docu updates
 - minor build update
   (compile with -c -O, mbuffer.o is dependent on Makefile)
-- allow in-memory locking of file based buffers
 
 20080329:
 - configure should check if ST_BLKSIZE feature is available

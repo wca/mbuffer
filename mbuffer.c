@@ -1084,14 +1084,17 @@ static unsigned long long calcint(const char **argv, int c, unsigned long long d
 
 
 
-static int argcheck(const char *opt, const char **argv, int *c)
+static int argcheck(const char *opt, const char **argv, int *c, int argc)
 {
-	if (strncmp(opt,argv[*c],2))
+	if (strncmp(opt,argv[*c],2)) 
 		return 1;
 	if (strlen(argv[*c]) > 2)
 		argv[*c] += 2;
-	else
+	else {
 		(*c)++;
+		if (*c == argc)
+			fatal("missing argument to option %s\n",opt);
+	}
 	return 0;
 }
 
@@ -1121,14 +1124,14 @@ int main(int argc, const char **argv)
 	Msgbuf = Msg + PrefixLen;
 	Log = STDERR_FILENO;
 	for (c = 1; c < argc; c++) {
-		if (!argcheck("-s",argv,&c)) {
+		if (!argcheck("-s",argv,&c,argc)) {
 			Blocksize = Outsize = calcint(argv,c,Blocksize);
 			optSset = 1;
 			debugmsg("Blocksize = %llu\n",Blocksize);
 			if (Blocksize < 100)
 				fatal("cannot set blocksize as percentage of total physical memory\n");
 #ifdef _SC_PHYS_PAGES
-		} else if (!argcheck("-m",argv,&c)) {
+		} else if (!argcheck("-m",argv,&c,argc)) {
 			totalmem = calcint(argv,c,totalmem);
 			optMset = 1;
 			if (totalmem < 100) {
@@ -1142,62 +1145,60 @@ int main(int argc, const char **argv)
 			}
 			debugmsg("totalmem = %llu\n",totalmem);
 #endif
-		} else if (!argcheck("-b",argv,&c)) {
+		} else if (!argcheck("-b",argv,&c,argc)) {
 			Numblocks = (atoi(argv[c])) ? ((unsigned long long) atoll(argv[c])) : Numblocks;
 			optBset = 1;
 			debugmsg("Numblocks = %llu\n",Numblocks);
-		} else if (!argcheck("-d",argv,&c)) {
+		} else if (!argcheck("-d",argv,&c,argc)) {
 #ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 			setOutsize = 1;
 			debugmsg("setting output size according to the blocksize of the device\n");
 #else
 			fatal("cannot determine blocksize of device (unsupported by OS)\n");
 #endif
-		} else if (!argcheck("-v",argv,&c)) {
+		} else if (!argcheck("-v",argv,&c,argc)) {
+			if (c == argc)
+				fatal("missing argument for option -v");
 			Verbose = (atoi(argv[c])) ? (atoi(argv[c])) : Verbose;
 			debugmsg("Verbose = %d\n",Verbose);
-		} else if (!argcheck("-u",argv,&c)) {
+		} else if (!argcheck("-u",argv,&c,argc)) {
 			Pause = (atoi(argv[c])) ? (atoi(argv[c])) * 1000 : Pause;
 			debugmsg("Pause = %d\n",Pause);
-		} else if (!argcheck("-r",argv,&c)) {
+		} else if (!argcheck("-r",argv,&c,argc)) {
 			MaxReadSpeed = calcint(argv,c,0);
 			debugmsg("MaxReadSpeed = %lld\n",MaxReadSpeed);
-		} else if (!argcheck("-R",argv,&c)) {
+		} else if (!argcheck("-R",argv,&c,argc)) {
 			MaxWriteSpeed = calcint(argv,c,0);
 			debugmsg("MaxWriteSpeed = %lld\n",MaxWriteSpeed);
-		} else if (!argcheck("-n",argv,&c)) {
+		} else if (!argcheck("-n",argv,&c,argc)) {
 			Multivolume = atoi(argv[c]) - 1;
 			if (Multivolume <= 0)
 				fatal("argument for number of volumes must be > 0\n");
 			debugmsg("Multivolume = %d\n",Multivolume);
-		} else if (!argcheck("-i",argv,&c)) {
+		} else if (!argcheck("-i",argv,&c,argc)) {
 			Infile = argv[c];
 			debugmsg("Infile = %s\n",Infile);
-		} else if (!argcheck("-o",argv,&c)) {
+		} else if (!argcheck("-o",argv,&c,argc)) {
 			Outfile = argv[c];
 			debugmsg("Outfile = \"%s\"\n",Outfile);
-		} else if (!argcheck("-I",argv,&c)) {
+		} else if (!argcheck("-I",argv,&c,argc)) {
 			getNetVars(argv,&c,&client,&netPortIn);
 			debugmsg("Network input set to %s:%hu\n",client,netPortIn);
-		} else if (!argcheck("-O",argv,&c)) {
+		} else if (!argcheck("-O",argv,&c,argc)) {
 			getNetVars(argv,&c,&server,&netPortOut);
 			debugmsg("Output: server = %s, port = %hu\n",server,netPortOut);
 			Sendout = 1;
-		} else if (!argcheck("-T",argv,&c)) {
+		} else if (!argcheck("-T",argv,&c,argc)) {
 			Tmpfile = malloc(strlen(argv[c]) + 1);
 			if (!Tmpfile)
 				fatal("out of memory\n");
 			(void) strcpy(Tmpfile, argv[c]);
 			Memmap = 1;
 			debugmsg("Tmpfile = %s\n",Tmpfile);
-			if (Memlock) {
-				Memlock = 0;
-				warningmsg("cannot lock file based buffers in memory\n");
-			}
 		} else if (!strcmp("-t",argv[c])) {
 			Memmap = 1;
 			debugmsg("mm = 1\n");
-		} else if (!argcheck("-l",argv,&c)) {
+		} else if (!argcheck("-l",argv,&c,argc)) {
 			Log = open(argv[c],O_WRONLY|O_TRUNC|O_CREAT|LARGEFILE,0666);
 			if (-1 == Log) {
 				Log = STDERR_FILENO;
@@ -1213,22 +1214,22 @@ int main(int argc, const char **argv)
 		} else if (!strcmp("-c",argv[c])) {
 			debugmsg("enabling full synchronous I/O\n");
 			OptSync = O_DSYNC;
-		} else if (!argcheck("-a",argv,&c)) {
+		} else if (!argcheck("-a",argv,&c,argc)) {
 			Autoloader = 1;
 			Autoload_time = atoi(argv[c]);
 			debugmsg("Autoloader time = %d\n",Autoload_time);
-		} else if (!argcheck("-A",argv,&c)) {
+		} else if (!argcheck("-A",argv,&c,argc)) {
 			Autoloader = 1;
 			Autoload_cmd = argv[c];
 			debugmsg("Autoloader command = \"%s\"\n", Autoload_cmd);
-		} else if (!argcheck("-P",argv,&c)) {
+		} else if (!argcheck("-P",argv,&c,argc)) {
 			if (1 != sscanf(argv[c],"%lf",&StartWrite))
 				StartWrite = 0;
 			StartWrite /= 100;
 			if ((StartWrite > 1) || (StartWrite <= 0))
 				fatal("error in argument -P: must be bigger than 0 and less or equal 100");
 			debugmsg("StartWrite = %1.2lf\n",StartWrite);
-		} else if (!argcheck("-p",argv,&c)) {
+		} else if (!argcheck("-p",argv,&c,argc)) {
 			if (1 == sscanf(argv[c],"%lf",&StartRead))
 				StartRead /= 100;
 			else
@@ -1261,7 +1262,7 @@ int main(int argc, const char **argv)
 #else
 			warningmsg("md5 hash support has not been compiled in!");
 #endif
-		} else if (!argcheck("-D",argv,&c)) {
+		} else if (!argcheck("-D",argv,&c,argc)) {
 			OutVolsize = calcint(argv,c,0);
 			debugmsg("OutVolsize = %llu\n",OutVolsize);
 		} else
@@ -1352,7 +1353,7 @@ int main(int argc, const char **argv)
 			fatal("could not resize temporary file: %s\n",strerror(errno));
 		if (-1 == write(Tmp,&c,sizeof(int)))
 			fatal("could not resize temporary file: %s\n",strerror(errno));
-		Buffer[0] = mmap(0,Blocksize*Numblocks,PROT_READ|PROT_WRITE,MAP_PRIVATE,Tmp,0);
+		Buffer[0] = mmap(0,Blocksize*Numblocks,PROT_READ|PROT_WRITE,MAP_SHARED,Tmp,0);
 		if (MAP_FAILED == Buffer[0])
 			fatal("could not map buffer-file to memory: %s\n",strerror(errno));
 		debugmsg("temporary file mapped to address %p\n",Buffer[0]);
@@ -1378,6 +1379,8 @@ int main(int argc, const char **argv)
 			warningmsg("could not change to uid 0 to lock memory (is mbuffer setuid root?)\n");
 		else if ((0 != mlock((char *)Buffer,Numblocks * sizeof(char *))) || (0 != mlock(Buffer[0],Blocksize * Numblocks)))
 			warningmsg("could not lock buffer in memory: %s\n",strerror(errno));
+		else
+			infomsg("memory locked successfully\n");
 		err = seteuid(uid);	/* don't give anyone a chance to attack this program, so giveup uid 0 after locking... */
 		assert(err == 0);
 	}

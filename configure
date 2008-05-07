@@ -1867,7 +1867,7 @@ test -n "$target_alias" &&
 
 
 PACKAGE=mbuffer
-VERSION=20080502
+VERSION=20080507
 
 
 test "$prefix" = NONE && prefix=/usr/local

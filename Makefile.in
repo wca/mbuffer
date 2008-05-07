@@ -23,7 +23,7 @@ all: $(TARGET)
 $(OBJECTS): config.h Makefile
 
 $(TARGET): $(OBJECTS)
-	$(CC) $(CFLAGS) $(LDFLAGS) $(LIBS) $(OBJECTS) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJECTS) $(LIBS) -o $@
 
 clean:
 	-$(RM) $(OBJECTS)
