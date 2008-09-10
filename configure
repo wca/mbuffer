@@ -663,8 +663,8 @@ target
 target_cpu
 target_vendor
 target_os
-CFLAGS
 CC
+CFLAGS
 LDFLAGS
 CPPFLAGS
 ac_ct_CC
@@ -1269,8 +1269,8 @@ Optional Features:
   --enable-FEATURE[=ARG]  include FEATURE [ARG=yes]
   --disable-assert        turn off assertions
   --disable-largefile     omit support for large files
---disable-debug           disable verbose logging to console for debugging purpose
---disable-md5             disable md5 hash generation
+  --disable-debug         disable verbose logging to console for debugging purpose
+  --disable-md5           disable md5 hash generation
 
 Some influential environment variables:
   CC          C compiler command
@@ -1867,20 +1867,31 @@ test -n "$target_alias" &&
 
 
 PACKAGE=mbuffer
-VERSION=20080507
+VERSION=20080910
+
+if test "${LD_LIBRARY_PATH}" != "" ; then
+	echo ""
+	echo "    WARNING: LD_LIBRARY_PATH is set. This can cause severe problems!!!"
+	echo "    Please learn about using RUNPATH instead of LD_LIBRARY_PATH - e.g. here:"
+	echo "    - http://prefetch.net/articles/linkers.badldlibrary.html"
+	echo "    - http://blogs.sun.com/ali/entry/avoiding_ld_library_path_the"
+	echo "    For gcc, you can pass LDFLAGS=\"-R/usr/local/lib\" to configure,"
+	echo "    instead of setting LD_LIBRARY_PATH."
+	echo ""
+	sleep 5
+fi
 
 
 test "$prefix" = NONE && prefix=/usr/local
 test "$exec_prefix" = NONE && exec_prefix=$prefix
 
+USRCFLAGS=$CFLAGS
 
 ac_ext=c
 ac_cpp='$CPP $CPPFLAGS'
 ac_compile='$CC -c $CFLAGS $CPPFLAGS conftest.$ac_ext >&5'
 ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
 ac_compiler_gnu=$ac_cv_c_compiler_gnu
-
-CFLAGS="${CFLAGS=-g -O}"
 
 ac_ext=c
 ac_cpp='$CPP $CPPFLAGS'
@@ -2869,6 +2880,10 @@ else
 echo "${ECHO_T}no" >&6; }
 fi
 
+
+
+test "${USRCFLAGS}" = "" -a "${GCC}" = "yes" && CFLAGS="-g -O2 -Wall"
+test "${USRCFLAGS}" = "" -a "${GCC}" != "yes" && CFLAGS="-g -O"
 
 
 
@@ -5369,6 +5384,7 @@ _ACEOF
 
 
 
+
 cat >>confdefs.h <<\_ACEOF
 #define _REENTRANT 1
 _ACEOF
@@ -6042,8 +6058,8 @@ target!$target$ac_delim
 target_cpu!$target_cpu$ac_delim
 target_vendor!$target_vendor$ac_delim
 target_os!$target_os$ac_delim
-CFLAGS!$CFLAGS$ac_delim
 CC!$CC$ac_delim
+CFLAGS!$CFLAGS$ac_delim
 LDFLAGS!$LDFLAGS$ac_delim
 CPPFLAGS!$CPPFLAGS$ac_delim
 ac_ct_CC!$ac_ct_CC$ac_delim

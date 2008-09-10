@@ -123,7 +123,7 @@ If TMPDIR is set, mbuffer allocates storage for file based buffers in this
 directory\&. If TMPDIR is unset \fI/var/tmp\fR will be used\&.
 .SH "FILES"
 .LP 
-\fI$PREFIX/mbuffer\fP 
+\fI@prefix@/bin/mbuffer\fP 
 .br 
 \fI/var/tmp/mbuffer-*\fP 
 .SH "EXAMPLES"
@@ -132,32 +132,59 @@ To run this program with the default options just type:
 .LP 
 mbuffer
 .LP 
+.LP 
 Using mbuffer to do a backup with tar to the default tape device. Options for this example: memory mapped temporary file with a size of 10 Megabytes, start after 80% of the buffer have been filled.
 .LP 
 tar cf \- mydirectory | gzip | mbuffer \-t \-m 10M \-p 80 \-f \-o $TAPE
+.LP 
 .LP 
 Using mbuffer with 3 tapes for input and extracting the contents in the current work directory:
 .LP 
 mbuffer \-n 3 \-i $TAPE | gzip \-dc | tar xf \-
 .LP 
+.LP 
 Using mbuffer to write to multiple tape volumes:
 .LP 
 tar cf \- /usr | mbuffer \-f \-o $TAPE
 .LP 
+.LP 
 Write to multiple tapes and erase every tape before writing:
 .LP 
 tar cf \- /usr | mbuffer \-A "echo next tape; read a < /dev/tty; mt erase $TAPE" \-f \-o $TAPE
+.LP
 .LP
 Making a backup via network:
 .LP 
 \fItape server: \fPmbuffer \-I 8000 \-f \-o $TAPE
 .LP 
 \fIbackup client: \fPtar zcf \- /home | mbuffer \-O tapeserver:8000
+.LP
+.LP
+Distributing a directory tree to multiple machines:
+.LP
+\fImaster: \fPtar cf - /tree_to_clone | mbuffer -O clone0:8000 -O clone1:8000
+.LP
+\fIclones: \fPmbuffer -I master:8000 | tar xf -
+.SH "EXITCODE"
+.LP
+mbuffer return 0 upon success. Any kind of failure will yield a non-zero
+exit code.
 .SH "AUTHORS"
 .LP 
-Thomas Maier\-Komor <software@maier\-komor.de>
+Thomas Maier\-Komor <thomas@maier\-komor.de>
+.SH "DONATIONS"
+.LP
+If you like this software, and use it for production porposes in your
+company, please consider making a donation to support this work. 
+You can donate directly via PayPal to the author's e-mail address
+(thomas@maier\-komor.de).
 .SH "HOMEPAGE"
-.LP http://www.maier-komor.de/mbuffer.html
+.LP
+http://www.maier\-komor.de/mbuffer.html
+.SH "LICENSE"
+.LP
+This software is published under GNU General Public License V3. See file
+LICENSE for details.
 .SH "SEE ALSO"
 .LP 
-buffer(1), gpl(7)
+buffer(1)

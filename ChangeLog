@@ -1,3 +1,14 @@
+20080910:
+- new feature: support for multiple ouptuts
+- new LICENSE: GPLv3
+- fixed a race-condition in logging
+- adjusted CFLAGS for gcc
+- warn about LD_LIBRARY_PATH interfering with build process
+- the exitcode of autoloader command should be checked
+- changed default buffer size to use 2% of available memory
+- changed default block size to system pagesize
+- added make target for lint
+
 20080507:
 - memory locking for file fails if -L is passed before -T
 - use MAP_SHARED instead of MAP_PRIVATE to simplify fork in system

@@ -36,3 +36,6 @@ install: $(TARGET)
 	-$(INSTALL) -d $(DESTDIR)$(bindir)
 	$(INSTALL) $(TARGET) $(DESTDIR)$(bindir)
 	$(INSTALL) mbuffer.1 $(mandir)
+
+lint:
+	lint $(CFLAGS) mbuffer.c

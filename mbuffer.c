@@ -1,6 +1,20 @@
 /*
- * This file is licensed according to the GPLv2. See file LICENSE for details.
- * Copyright 2000-2008, Thomas Maier-Komor
+ *  Copyright (C) 2000-2008, Thomas Maier-Komor
+ *
+ *  This is the source code of mbuffer.
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "config.h"
@@ -33,7 +47,7 @@
    disable sendfile support */
 	#ifndef SFV_FD_SELF
 	#ifdef __GNUC__
-	#warning Your sendfile implementation does not seem to support sending from buffers - disabling sendfile support.
+	#warning sendfile is unable to send from buffers
 	#endif
 	#undef HAVE_SENDFILE
 	#endif
@@ -74,10 +88,8 @@
 #define LARGEFILE 0
 #endif
 
-#define MSGSIZE 256
-
-static pthread_t Reader, Writer;
-static long Verbose = 3, In = 0, Out = 0, Tmp = 0, Pause = 0, Memmap = 0,
+static pthread_t Reader;
+static long Verbose = 3, In = 0, Tmp = 0, Pause = 0, Memmap = 0,
 	Status = 1, Nooverwrite = O_EXCL, Outblocksize = 0,
 	Autoloader = 0, Autoload_time = 0, Sock = 0, OptSync = 0,
 	ErrorOccured = 0;
@@ -86,16 +98,21 @@ static unsigned long Outsize = 10240;
 static long  Hash = 0;
 #endif
 static volatile int
-	Finish = 0,	/* this is for graceful termination */
-	Terminate = 0;	/* abort execution, because of error or signal */
-static unsigned long long  Rest = 0, Blocksize = 10240, Numblocks = 256,
-	MaxReadSpeed = 0, MaxWriteSpeed = 0, OutVolsize = 0;
+	Finish = -1,	/* this is for graceful termination */
+	Terminate = 0,	/* abort execution, because of error or signal */
+	EmptyCount = 0,	/* counter incremented when buffer runs empty */
+	FullCount = 0,	/* counter incremented when buffer gets full */
+	NumSenders = -1,/* number of sender threads */
+	MainOutOK = 1;	/* is the main outputThread still writing or just coordinating senders */
+static volatile unsigned long long Rest = 0;
+static unsigned long long Blocksize = 10240, MaxReadSpeed = 0,
+		     MaxWriteSpeed = 0, OutVolsize = 0;
 static volatile unsigned long long Numin = 0, Numout = 0;
-static volatile int EmptyCount = 0, FullCount = 0;
 static double StartWrite = 0, StartRead = 1;
-static char *Tmpfile = 0, **Buffer, *Msgbuf, *Msg;
-static const char *Infile = 0, *Outfile = 0, *Autoload_cmd = 0;
-static int Multivolume = 0, Memlock = 0, Sendout = 0, PrefixLen;
+static char *Tmpfile = 0, **Buffer, *Prefix;
+static const char *Infile = 0, *Autoload_cmd = 0;
+static int Multivolume = 0, Memlock = 0, Sendout = 0, PrefixLen = 0,
+	   Numblocks = 512, SetOutsize = 0;
 #ifdef HAVE_LIBMHASH
 static MHASH MD5hash;
 #elif defined HAVE_LIBMD5
@@ -106,75 +123,147 @@ static MD5_CTX md5ctxt;
 static sem_t Dev2Buf, Buf2Dev;
 static pthread_cond_t
 	PercLow = PTHREAD_COND_INITIALIZER,	/* low watermark */
-	PercHigh = PTHREAD_COND_INITIALIZER;	/* high watermark */
+	PercHigh = PTHREAD_COND_INITIALIZER,	/* high watermark */
+	SendCond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t
 	TermMut = PTHREAD_MUTEX_INITIALIZER,	/* prevents statusThread from interfering with request*Volume */
 	LowMut = PTHREAD_MUTEX_INITIALIZER,
-	HighMut = PTHREAD_MUTEX_INITIALIZER;
+	HighMut = PTHREAD_MUTEX_INITIALIZER,
+#if !defined(__sun)
+	LogMut = PTHREAD_MUTEX_INITIALIZER,
+#endif
+	SendMut = PTHREAD_MUTEX_INITIALIZER;
 static int Log = -1;
 static int Terminal = 1;
 static struct timeval Starttime;
+typedef struct destination {
+	const char *arg, *name, *result;
+	int port, fd;
+	pthread_t thread;
+	struct destination *next;
+} dest_t;
+static dest_t *Dest = 0;
+static char *volatile SendAt = 0;
+static volatile int SendSize = 0, ActSenders = 0;
+
+#ifdef __CYGWIN__
+#undef assert
+#define assert(x) ((x) || (*(char *) 0 = 1))
+#endif
 
 
 #ifdef DEBUG
-static void debugmsg(const char *msg, ...)
+static void logdebug(const char *msg, ...)
 {
-	if (Verbose >= 5) {
-		va_list val;
-		int num;
+	va_list val;
+	char buf[256];
+	int b = PrefixLen;
 
-		va_start(val,msg);
-		num = vsnprintf(Msgbuf,MSGSIZE,msg,val);
-		assert(num < MSGSIZE);
-		(void) write(Log,Msg,num + PrefixLen);
-		va_end(val);
+	va_start(val,msg);
+	(void) memcpy(buf,Prefix,b);
+	b += vsnprintf(buf + b,sizeof(buf)-b,msg,val);
+	assert(b < sizeof(buf));
+#if defined(__sun) || defined(__linux)
+	(void) write(Log,buf,b);
+#else
+	{
+		int err;
+		err = pthread_mutex_lock(&LogMut);
+		assert(err == 0);
+		(void) write(Log,buf,b);
+		err = pthread_mutex_unlock(&LogMut);
+		assert(err == 0);
 	}
+#endif
+	va_end(val);
 }
+#define debugmsg if (Verbose >= 5) logdebug
 #else
 #define debugmsg
 #endif
+
 
 static void infomsg(const char *msg, ...)
 {
 	if (Verbose >= 4) {
 		va_list val;
-		int num;
+		char buf[256], *b = buf + PrefixLen;
 
 		va_start(val,msg);
-		num = vsnprintf(Msgbuf,MSGSIZE,msg,val);
-		assert(num < MSGSIZE);
-		(void) write(Log,Msg,num + PrefixLen);
+		(void) memcpy(buf,Prefix,PrefixLen);
+		b += vsnprintf(b,sizeof(buf)-(b-buf),msg,val);
+		assert(b < buf + sizeof(buf));
+#if defined(__sun) || defined(__linux)
+		(void) write(Log,buf,b - buf);
+#else
+		{
+			int err;
+			err = pthread_mutex_lock(&LogMut);
+			assert(err == 0);
+			(void) write(Log,buf,b - buf);
+			err = pthread_mutex_unlock(&LogMut);
+			assert(err == 0);
+		}
+#endif
 		va_end(val);
 	}
 }
+
 
 static void warningmsg(const char *msg, ...)
 {
 	if (Verbose >= 3) {
 		va_list val;
-		int num = 9;
+		char buf[256], *b = buf + PrefixLen;
 
 		va_start(val,msg);
-		(void) memcpy(Msgbuf,"warning: ",9);
-		num += vsnprintf(Msgbuf+9,MSGSIZE-9,msg,val);
-		assert(num < MSGSIZE);
-		(void) write(Log,Msg,num + PrefixLen);
+		(void) memcpy(buf,Prefix,PrefixLen);
+		(void) memcpy(b,"warning: ",9);
+		b += 9;
+		b += vsnprintf(b,sizeof(buf)-(b-buf),msg,val);
+		assert(b < buf + sizeof(buf));
+#if defined(__sun) || defined(__linux)
+		(void) write(Log,buf,b - buf);
+#else
+		{
+			int err;
+			err = pthread_mutex_lock(&LogMut);
+			assert(err == 0);
+			(void) write(Log,buf,b - buf);
+			err = pthread_mutex_unlock(&LogMut);
+			assert(err == 0);
+		}
+#endif
 		va_end(val);
 	}
 }
+
 
 static void errormsg(const char *msg, ...)
 {
 	ErrorOccured = 1;
 	if (Verbose >= 2) {
 		va_list val;
-		int num = 7;
+		char buf[256], *b = buf + PrefixLen;
 
 		va_start(val,msg);
-		(void) memcpy(Msgbuf,"error: ",7);
-		num += vsnprintf(Msgbuf+7,MSGSIZE-7,msg,val);
-		assert(num < MSGSIZE);
-		(void) write(Log,Msg,num + PrefixLen);
+		(void) memcpy(buf,Prefix,PrefixLen);
+		(void) memcpy(b,"error: ",7);
+		b += 7;
+		b += vsnprintf(b,sizeof(buf)-(b-buf),msg,val);
+		assert(b < buf + sizeof(buf));
+#if defined(__sun) || defined(__linux)
+		(void) write(Log,buf,b - buf);
+#else
+		{
+			int err;
+			err = pthread_mutex_lock(&LogMut);
+			assert(err == 0);
+			(void) write(Log,buf,b - buf);
+			err = pthread_mutex_unlock(&LogMut);
+			assert(err == 0);
+		}
+#endif
 		va_end(val);
 	}
 }
@@ -184,13 +273,26 @@ static void fatal(const char *msg, ...)
 {
 	if (Verbose >= 1) {
 		va_list val;
-		int num = 7;
+		char buf[256], *b = buf + PrefixLen;
 
 		va_start(val,msg);
-		(void) memcpy(Msgbuf,"fatal: ",7);
-		num += vsnprintf(Msgbuf+7,MSGSIZE-7,msg,val);
-		assert(num < MSGSIZE);
-		(void) write(Log,Msg,num + PrefixLen);
+		(void) memcpy(buf,Prefix,PrefixLen);
+		(void) memcpy(b,"fatal: ",7);
+		b += 7;
+		b += vsnprintf(b,sizeof(buf)-(b-buf),msg,val);
+		assert(b < buf + sizeof(buf));
+#if defined(__sun) || defined(__linux)
+		(void) write(Log,buf,b - buf);
+#else
+		{
+			int err;
+			err = pthread_mutex_lock(&LogMut);
+			assert(err == 0);
+			(void) write(Log,buf,b - buf);
+			err = pthread_mutex_unlock(&LogMut);
+			assert(err == 0);
+		}
+#endif
 		va_end(val);
 	}
 	exit(EXIT_FAILURE);
@@ -200,6 +302,7 @@ static void fatal(const char *msg, ...)
 
 static char *kb2str(double v)
 {
+	/* NOT THREAD SAFE - only used by statusThread */
 	const char *dim = "kMGT", *f;
 	static char s[8];
 
@@ -226,14 +329,23 @@ static char *kb2str(double v)
 
 
 
-static void summary(unsigned long long numb, double secs)
+static void summary(unsigned long long numb, double secs, int numthreads)
 {
-	int h = (int) secs/3600, m = (int) (secs - h * 3600)/60;
-	double av = (double)(numb >>= 10)/secs;
+	int h = (int) secs/3600,
+	    m = (int) (secs - h * 3600)/60;
+	double av = (double)(numb >>= 10)/secs*numthreads;
 	char buf[256], *msg = buf;
 	
+	if ((Terminate == 1) || (Status == 0)) {
+		if (Status)
+			write(STDERR_FILENO,"\n",1);
+		return;
+	}
 	secs -= m * 60 + h * 3600;
-	msg += sprintf(msg,"\nsummary: %sByte in ",kb2str(numb));
+	if (numthreads > 1)
+		msg += sprintf(msg,"\nsummary: %d x %sByte in ",numthreads,kb2str(numb));
+	else
+		msg += sprintf(msg,"\nsummary: %sByte in ",kb2str(numb));
 	if (h)
 		msg += sprintf(msg,"%d h %02d min ",h,m);
 	else if (m)
@@ -244,7 +356,6 @@ static void summary(unsigned long long numb, double secs)
 	if (FullCount)
 		msg += sprintf(msg,", %dx full",FullCount);
 	*msg++ = '\n';
-	*msg = 0;
 #ifdef HAVE_LIBMHASH
 	if (Hash) {
 		unsigned char hashvalue[16];
@@ -279,7 +390,10 @@ static void summary(unsigned long long numb, double secs)
 		*msg++ = '\n';
 	}
 #endif
-	(void) write(STDERR_FILENO,buf,strlen(buf));
+	*msg = 0;
+	if (Log != STDERR_FILENO)
+		(void) write(Log,buf,msg-buf);
+	(void) write(STDERR_FILENO,buf,msg-buf);
 }
 
 
@@ -287,8 +401,18 @@ static void summary(unsigned long long numb, double secs)
 static RETSIGTYPE sigHandler(int signr)
 {
 	switch (signr) {
-	case SIGINT:
 	case SIGTERM:
+	case SIGINT:
+		{
+			int err;
+			dest_t *d = Dest;
+			while (d) {
+				(void) pthread_cancel(d->thread);
+				d = d->next;
+			}
+			err = pthread_cond_broadcast(&SendCond);
+			assert(err == 0);
+		}
 		ErrorOccured = 1;
 		Terminate = 1;
 		break;
@@ -326,14 +450,15 @@ static void statusThread(void)
 	double in = 0, out = 0, total, diff, fill;
 	unsigned long long lin = 0, lout = 0;
 	int unwritten = 1;	/* assumption: initially there is at least one unwritten block */
-	int ret;
+	int ret, numthreads = 0;
+	dest_t *d;
 
 	last = Starttime;
 #ifdef __alpha
 	(void) mt_usleep(1000);	/* needed on alpha (stderr fails with fpe on nan) */
 #endif
-	while (!(Finish && (unwritten == 0)) && (Terminate == 0)) {
-		int err,nw;
+	while (((Finish == -1) || (unwritten != 0)) && (Terminate == 0)) {
+		int err,nw, numsender;
 		char buf[256], *b = buf;
 		(void) mt_usleep(500000);
 		(void) gettimeofday(&now,0);
@@ -353,23 +478,55 @@ static void statusThread(void)
 		total = (Numout * Blocksize) >> 10;
 		fill = (fill < 0) ? 0 : fill;
 		b += sprintf(b,"\rin @ %sB/s",kb2str(in));
-		b += sprintf(b,", out @ %sB/s",kb2str(out));
-		b += sprintf(b,", %sB total, buffer %3.0f%% full",kb2str(total),fill);
-		nw = write(STDERR_FILENO,buf,strlen(buf));
+		numsender = NumSenders + MainOutOK;
+		b += sprintf(b,", out @ %sB/s",kb2str(out * numsender));
+		if (numsender != 1)
+			b += sprintf(b,", %d x %sB total, buffer %3.0f%% full",numsender,kb2str(total),fill);
+		else
+			b += sprintf(b,", %sB total, buffer %3.0f%% full",kb2str(total),fill);
+#ifndef __sun
+		if (Log == STDERR_FILENO) {
+			int e;
+			e = pthread_mutex_lock(&LogMut);
+			assert(e == 0);
+			nw = write(STDERR_FILENO,buf,strlen(buf));
+			e = pthread_mutex_unlock(&LogMut);
+			assert(e == 0);
+		} else
+#endif
+			nw = write(STDERR_FILENO,buf,strlen(buf));
 		err = pthread_mutex_unlock(&TermMut);
 		assert(0 == err);
 		if (nw == -1)	/* stop trying to print status messages after a write error */
 			break;
 	}
+	d = Dest;
 	if (Terminate) {
+		int err;
 		infomsg("\nterminating...\n");
-		(void) pthread_cancel(Writer);
+		do {
+			(void) pthread_cancel(d->thread);
+			d = d->next;
+		} while (d);
+		err = pthread_cond_broadcast(&SendCond);
+		assert(err == 0);
 		(void) pthread_cancel(Reader);
 	}
 	infomsg("statusThread: joining to terminate...\n");
+	d = Dest;
+	do {
+		if (d->name) {
+			void *status;
+			debugmsg("joining %s\n",d->arg);
+			ret = pthread_join(d->thread,&status);
+			if (ret != 0)
+				fatal("error joining %s(%s): %s\n",d->arg,d->name,strerror(errno));
+			if ((int)status == 0)
+				++numthreads;
+		}
+		d = d->next;
+	} while (d);
 	ret = pthread_join(Reader,0);
-	assert(0 == ret);
-	ret = pthread_join(Writer,0);
 	assert(0 == ret);
 	if (Memmap) {
 		int ret = munmap(Buffer[0],Blocksize*Numblocks);
@@ -378,7 +535,7 @@ static void statusThread(void)
 	(void) close(Tmp);
 	(void) gettimeofday(&now,0);
 	diff = now.tv_sec - Starttime.tv_sec + (double) now.tv_usec / 1000000 - (double) Starttime.tv_usec / 1000000;
-	summary(Numout * Blocksize + Rest, diff);
+	summary(Numout * Blocksize + Rest, diff, numthreads);
 }
 
 
@@ -452,6 +609,7 @@ static void requestInputVolume(void)
 		errormsg("error closing input: %s\n",strerror(errno));
 	do {
 		if ((Autoloader) && (Infile)) {
+			int ret;
 			infomsg("requesting change of volume...\n");
 			if (Autoload_cmd) {
 				cmd = Autoload_cmd;
@@ -459,14 +617,20 @@ static void requestInputVolume(void)
 				(void) snprintf(cmd_buf, sizeof(cmd_buf), "mt -f %s offline", Infile);
 				cmd = cmd_buf;
 			}
-			if (-1 == system(cmd)) {
-				warningmsg("error running \"%s\" to change volume in autoloader...\n", cmd);
-				Autoloader = 0;
-				continue;
+			ret = system(cmd);
+			if (0 < ret) {
+				errormsg("error running \"%s\" to change volume in autoloader: exitcode %d\n",cmd,ret);
+				Terminate = 1;
+				pthread_exit((void *) -1);
+			} else if (0 > ret) {
+				errormsg("error starting \"%s\" to change volume in autoloader: %s\n", cmd, strerror(errno));
+				Terminate = 1;
+				pthread_exit((void *) -1);
 			}
-			infomsg("waiting for drive to get ready...\n");
-			if (Autoload_time)
+			if (Autoload_time) {
+				infomsg("waiting for drive to get ready...\n");
 				(void) sleep(Autoload_time);
+			}
 		} else {
 			int err;
 			char c = 0, msg[] = "\ninsert next volume and press return to continue...";
@@ -506,7 +670,8 @@ static void requestInputVolume(void)
 static void *inputThread(void *ignored)
 {
 	int fill = 0;
-	unsigned long long num, at = 0;
+	unsigned long long num;
+	int at = 0;
 	long long xfer = 0;
 	const double startread = StartRead, startwrite = StartWrite;
 	struct timeval last;
@@ -533,29 +698,33 @@ static void *inputThread(void *ignored)
 		err = sem_wait(&Dev2Buf); /* Wait for one or more buffer blocks to be free */
 		assert(err == 0);
 		if (Terminate) {	/* for async termination requests */
-			(void) pthread_cancel(Writer);
-			
-			debugmsg("inputThread: terminating upon termination request...\n");
+			debugmsg("inputThread: terminating early upon request...\n");
 			if (-1 == close(In))
 				errormsg("error closing input: %s\n",strerror(errno));
-			pthread_exit(0);
+			pthread_exit((void *)1);
 			return 0;	/* just to make lint happy... */
 		}
 		num = 0;
 		do {
 			int in;
 			in = read(In,Buffer[at] + num,Blocksize - num);
-			debugmsg("inputThread: read(In, Buffer[%llu] + %llu, %llu) = %d\n", at, num, Blocksize - num, in);
-			if ((!in) && (Terminal||Autoloader) && (Multivolume)) {
+			debugmsg("inputThread: read(In, Buffer[%d] + %llu, %llu) = %d\n", at, num, Blocksize - num, in);
+			if ((0 == in) && (Terminal||Autoloader) && (Multivolume)) {
 				requestInputVolume();
 			} else if (-1 == in) {
-				errormsg("inputThread: error reading at offset %llx: %s\n",Numin*Blocksize,strerror(errno));
-				Finish = 1;
+				errormsg("inputThread: error reading at offset 0x%llx: %s\n",Numin*Blocksize,strerror(errno));
 				if (num) {
+					Finish = at;
 					Rest = num;
-					err = sem_post(&Buf2Dev);
-					assert(err == 0);
+				} else if (at > 0) {
+					Finish = at-1;
+					Rest = 0;
+				} else {
+					Finish = Numblocks;
+					Rest = 0;
 				}
+				err = sem_post(&Buf2Dev);
+				assert(err == 0);
 				err = pthread_mutex_lock(&HighMut);
 				assert(err == 0);
 				err = pthread_cond_signal(&PercHigh);
@@ -566,21 +735,21 @@ static void *inputThread(void *ignored)
 				pthread_exit((void *) -1);
 			} else if (0 == in) {
 				Rest = num;
-				Finish = 1;
-				err = sem_post(&Buf2Dev);
-				assert(err == 0);
-				debugmsg("inputThread: last block has %d bytes\n",num);
+				Finish = at;
+				debugmsg("inputThread: last block has %llu bytes\n",num);
 				#ifdef HAVE_LIBMHASH
 				if (Hash)
 					mhash(MD5hash,Buffer[at],num);
 				#elif defined HAVE_LIBMD5
 				if (Hash)
-					MD5Update(&md5ctxt,(unsigned char *)Buffer[at],num);
+					MD5Update(&md5ctxt,(unsigned char *)Buffer[at],(unsigned int)num);
 				#elif defined HAVE_LIBCRYPTO
 				if (Hash)
 					MD5_Update(&md5ctxt,Buffer[at],num);
 				#endif
 				err = pthread_mutex_lock(&HighMut);
+				assert(err == 0);
+				err = sem_post(&Buf2Dev);
 				assert(err == 0);
 				err = pthread_cond_signal(&PercHigh);
 				assert(err == 0);
@@ -624,90 +793,278 @@ static void *inputThread(void *ignored)
 
 
 
-static void requestOutputVolume(void)
+static inline int syncSenders(char *b, int s)
 {
-	if (!Outfile) {
+	static volatile int size = 0;
+	static char *volatile buf = 0;
+	int err;
+	if (NumSenders == 0)
+		return 0;
+	if (b) {
+		buf = b;
+		size = s;
+	}
+	err = pthread_mutex_lock(&SendMut);
+	assert(err == 0);
+	if (s < 0)
+		--NumSenders;
+	if (--ActSenders) {
+		//debugmsg("syncSenders(%p,%d): ActSenders = %d\n",b,s,ActSenders);
+		err = pthread_cond_wait(&SendCond,&SendMut);
+		assert(err == 0);
+		err = pthread_mutex_unlock(&SendMut);
+		assert(err == 0);
+		//debugmsg("syncSenders(): continue\n");
+		return 0;
+	} else {
+		ActSenders = NumSenders + 1;
+		assert(buf);
+		SendAt = buf;
+		SendSize = size;
+		buf = 0;
+		err = pthread_mutex_unlock(&SendMut);
+		assert(err == 0);
+		err = sem_post(&Dev2Buf);
+		assert(err == 0);
+		/*debugmsg("syncSenders(): send %d@%p, BROADCAST\n",SendSize,SendAt);*/
+		err = pthread_cond_broadcast(&SendCond);
+		assert(err == 0);
+		return 1;
+	}
+}
+
+
+static inline void terminateSender(int fd, dest_t *d, int ret)
+{
+	debugmsg("terminating operation on %s\n",d->arg);
+	if (-1 != fd) {
+		if (0 != fsync(fd)) {
+			if (errno == EINVAL) {
+				infomsg("syncing unsupported on %s: omitted.\n",d->arg);
+			} else {
+				errormsg("error syncing %s: %s\n",d->arg,strerror(errno));
+			}
+		} else {
+			infomsg("syncing %s: done.\n",d->arg);
+		}
+		if (-1 == close(fd))
+			errormsg("error closing file %s: %s\n",d->arg,strerror(errno));
+	}
+	if (ret != 0) {
+		int ret = syncSenders(0,-1);
+		debugmsg("terminateSender(%s): sendSender(0,-1) = %d\n",d->arg,ret);
+	}
+	pthread_exit((void *) ret);
+}
+
+
+
+static void openNetworkOutput(dest_t *dest)
+{
+	struct sockaddr_in saddr;
+	struct hostent *h = 0;
+	int out;
+
+	debugmsg("creating socket for output to %s:%d...\n",dest->name,dest->port);
+	out = socket(AF_INET, SOCK_STREAM, 6);
+	if (0 > out) {
+		errormsg("could not create socket for network output: %s\n",strerror(errno));
+		return;
+	}
+	bzero((void *) &saddr, sizeof(saddr));
+	saddr.sin_port = htons(dest->port);
+	infomsg("resolving host %s...\n",dest->name);
+	if (0 == (h = gethostbyname(dest->name))) {
+#ifdef HAVE_HSTRERROR
+		dest->result = hstrerror(h_errno);
+		errormsg("could not resolve hostname %s: %s\n",dest->name,dest->result);
+#else
+		dest->result = "unable to resolve hostname";
+		errormsg("could not resolve hostname %s: error code %d\n",dest->name,h_errno);
+#endif
+		dest->fd = -1;
+		(void) close(out);
+		return;
+	}
+	saddr.sin_family = h->h_addrtype;
+	assert(h->h_length <= sizeof(saddr.sin_addr));
+	(void) memcpy(&saddr.sin_addr,h->h_addr_list[0],h->h_length);
+	infomsg("connecting to server at %s...\n",inet_ntoa(saddr.sin_addr));
+	if (0 > connect(out, (struct sockaddr *) &saddr, sizeof(saddr))) {
+		dest->result = strerror(errno);
+		errormsg("could not connect to %s:%d: %s\n",dest->name,dest->port,dest->result);
+		(void) close(out);
+		out = -1;
+	}
+	dest->fd = out;
+}
+
+
+
+
+static void *senderThread(void *arg)
+{
+	unsigned long long outsize = Blocksize;
+	dest_t *dest = (dest_t *)arg;
+	int out = dest->fd;
+#ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
+	struct stat st;
+#endif
+
+	debugmsg("sender(%s): starting...\n",dest->arg);
+#ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
+	debugmsg("checking output device...\n");
+	if (-1 == fstat(out,&st))
+		warningmsg("could not stat output %s: %s\n",dest->arg,strerror(errno));
+	else if (S_ISBLK(st.st_mode) || S_ISCHR(st.st_mode)) {
+		infomsg("blocksize is %d bytes on output device\n",st.st_blksize);
+		if ((Blocksize < st.st_blksize) || (Blocksize % st.st_blksize != 0)) {
+			warningmsg("Blocksize should be a multiple of the blocksize of the output device!\n"
+				"This can cause problems with some device/OS combinations...\n"
+				"Blocksize on output device %s is %d (transfer block size is %lld)\n", dest->arg, st.st_blksize, Blocksize);
+			if (SetOutsize) {
+				errormsg("unable to set output blocksize\n");
+				dest->result = strerror(errno);
+				terminateSender(out,dest,1);
+			}
+		} else {
+			if (SetOutsize) {
+				infomsg("setting output blocksize to %d\n",st.st_blksize);
+				outsize = st.st_blksize;
+			}
+		}
+	} else
+		infomsg("no device on output stream %s\n",dest->arg);
+#endif
+	for (;;) {
+		int size, num = 0;
+		syncSenders(0,0);
+		size = SendSize;
+		if (0 == size) {
+			debugmsg("senderThread(\"%s\"): done.\n",dest->arg);
+			terminateSender(out,dest,0);
+			return 0;	/* for lint */
+		}
+		if (Terminate) {
+			dest->result = "canceled";
+			terminateSender(out,dest,1);
+		}
+		do {
+			unsigned long long rest = size - num;
+			int ret;
+			assert(size >= num);
+#ifdef HAVE_SENDFILE
+			if (Sendout) {
+				off_t baddr = (off_t) (SendAt+num);
+				ret = sendfile(out,SFV_FD_SELF,&baddr,rest > outsize ? outsize : rest);
+				debugmsg("sender(%s): sendfile(Out, SFV_FD_SELF, &%p, %llu) = %d\n", dest->arg, (void*)baddr, (unsigned long long) (rest > outsize ? outsize : rest), ret);
+			} else
+#endif
+			{
+				char *baddr = SendAt+num;
+				ret = write(out,baddr,rest > outsize ? outsize :rest);
+				debugmsg("sender(%s): writing %llu@%p - ret = %d\n",dest->arg,rest,(void*)baddr,ret);
+			}
+			if (-1 == ret) {
+				errormsg("error writing to %s: %s\n",dest->arg,strerror(errno));
+				dest->result = strerror(errno);
+				terminateSender(out,dest,1);
+			}
+			num += ret;
+		} while (num != size);
+	}
+}
+
+
+
+static int requestOutputVolume(int out, const char *outfile)
+{
+	if (!outfile) {
 		errormsg("End of volume, but not end of input:\n"
 			"Output file must be given (option -o) for multi volume support!\n");
-		Terminate = 1;
-		pthread_exit((void *) -1);
+		return -1;
 	}
 	debugmsg("requesting new output volume\n");
-	if (-1 == close(Out))
-		errormsg("error closing output: %s\n",strerror(errno));
+	if (-1 == close(out))
+		errormsg("error closing output %s: %s\n",outfile,strerror(errno));
 	do {
 		mode_t mode;
 		if (Autoloader) {
 			const char default_cmd[] = "mt -f %s offline";
-			char cmd_buf[sizeof(default_cmd)+strlen(Outfile)];
+			char cmd_buf[sizeof(default_cmd)+strlen(outfile)];
 			const char *cmd = Autoload_cmd;
+			int err;
 
 			infomsg("requesting change of volume...\n");
 			if (cmd == 0) {
 				(void) snprintf(cmd_buf, sizeof(cmd_buf), default_cmd, Infile);
 				cmd = cmd_buf;
 			}
-			if (-1 == system(cmd)) {
-				warningmsg("error running \"%s\" to change volume in autoloader...\n", cmd);
+			err = system(cmd);
+			if (0 < err) {
+				errormsg("error running \"%s\" to change volume in autoloader - exitcode %d\n", cmd, err);
 				Autoloader = 0;
-				continue;
+				return -1;
+			} else if (0 > err) {
+				errormsg("error starting \"%s\" to change volume in autoloader: %s\n", cmd, strerror(errno));
+				Autoloader = 0;
+				return -1;
 			}
-			infomsg("waiting for drive to get ready...\n");
-			if (Autoload_time)
+			if (Autoload_time) {
+				infomsg("waiting for drive to get ready...\n");
 				(void) sleep(Autoload_time);
+			}
 		} else {
 			int err;
 			char c = 0, msg[] = "\nvolume full - insert new media and press return when ready...\n";
 			if (Terminal == 0) {
 				errormsg("End of volume, but not end of input.\n"
 					"Specify an autoload command, if you are working without terminal.\n");
-				Terminate = 1;
-				pthread_exit((void *) -1);
+				return -1;
 			}
 			err = pthread_mutex_lock(&TermMut);
 			assert(0 == err);
 			if (-1 == write(STDERR_FILENO,msg,sizeof(msg))) {
 				errormsg("error accessing controlling terminal for manual volume change request: %s\nConsider using autoload option, when running mbuffer without terminal.\n",strerror(errno));
-				Terminate = 1;
-				pthread_exit((void *) -1);
+				return -1;
 			}
 			do {
 				if (-1 == read(STDERR_FILENO,&c,1) && (errno != EINTR)) {
 					errormsg("error accessing controlling terminal for manual volume change request: %s\nConsider using autoload option, when running mbuffer without terminal.\n",strerror(errno));
-					Terminate = 1;
-					pthread_exit((void *) -1);
+					return -1;
 				}
 			} while (c != '\n');
 			err = pthread_mutex_unlock(&TermMut);
 			assert(0 == err);
 		}
 		mode = O_WRONLY|O_TRUNC|OptSync|LARGEFILE;
-		if (strncmp(Outfile,"/dev/",5))
+		if (strncmp(outfile,"/dev/",5))
 			mode |= Nooverwrite|O_CREAT;
-		if (-1 == (Out = open(Outfile,mode,0666)))
+		if (-1 == (out = open(outfile,mode,0666)))
 			errormsg("error reopening output file: %s\n",strerror(errno));
 #ifdef __sun
-		if (-1 == directio(Out,DIRECTIO_ON))
+		if (-1 == directio(out,DIRECTIO_ON))
 			infomsg("direct I/O hinting failed for output: %s\n",strerror(errno));
 #endif
-	} while (-1 == Out);
+	} while (-1 == out);
 	infomsg("continuing with next volume\n");
 	if (Terminal && ! Autoloader) {
 		char msg[] = "\nOK - continuing...\n";
 		(void) write(STDERR_FILENO,msg,sizeof(msg));
 	}
+	return out;
 }
 
 
 
-static void checkIncompleteOutput(void)
+static int checkIncompleteOutput(int out, const char *outfile)
 {
 	static int mulretry = 0;	/* well this isn't really good design,
 					   but better than a global variable */
 	
 	debugmsg("Outblocksize = %d, mulretry = %d\n",Outblocksize,mulretry);
 	if ((0 != mulretry) || (0 == Outblocksize)) {
-		requestOutputVolume();
+		out = requestOutputVolume(out,outfile);
 		debugmsg("resetting outputsize to normal\n");
 		if (0 != mulretry) {
 			Outsize = mulretry;
@@ -718,44 +1075,71 @@ static void checkIncompleteOutput(void)
 		mulretry = Outsize;
 		Outsize = Outblocksize;
 	}
+	return out;
 }
 
 
 
-static void terminateOutputThread(void)
+static void terminateOutputThread(dest_t *d)
 {
 	infomsg("outputThread: syncing...\n");
-	while (0 != fsync(Out)) {
+	while (0 != fsync(d->fd)) {
 		if (errno == EINTR) {
 			continue;
 		} else if (errno == EINVAL) {
-			warningmsg("output does not support syncing: omitted.\n");
+			infomsg("syncing unsupported on %s: omitted.\n",d->arg);
 			break;
 		} else {
-			fatal("error syncing: %s\n",strerror(errno));
+			errormsg("error syncing %s: %s\n",d->arg,strerror(errno));
+			break;
 		}
 	}
 	infomsg("outputThread: finished - exiting...\n");
-	if (-1 == close(Out))
-		errormsg("error closing output: %s\n",strerror(errno));
+	if (-1 == close(d->fd))
+		errormsg("error closing %s: %s\n",d->arg,strerror(errno));
 	pthread_exit(0);
 }
 
 
 
-static void *outputThread(void *ignored)
+static void *outputThread(void *arg)
 {
+	dest_t *dest = (dest_t *) arg;
 	unsigned at = 0;
-	int fill = 0;
+	int fill = 0, haderror = 0, out, ret;
 	const double startwrite = StartWrite, startread = StartRead;
 	unsigned long long blocksize = Blocksize;
 	long long xfer = 0;
 	struct timeval last;
 
 	/* initialize last to 0, because we don't want to wait initially */
+	ret = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,0);
+	assert(ret == 0);
 	(void) gettimeofday(&last,0);
-	assert(ignored == 0);
-	infomsg("\noutputThread: starting...\n");
+	assert(NumSenders >= 0);
+	if (dest->next) {
+		dest_t *d = dest->next;
+		debugmsg("NumSenders = %d\n",NumSenders);
+		ActSenders = NumSenders + 1;
+		ret = pthread_mutex_init(&SendMut,0);
+		assert(ret == 0);
+		ret = pthread_cond_init(&SendCond,0);
+		assert(ret == 0);
+		do {
+			if (d->fd != -1) {
+				debugmsg("creating sender for %s\n",d->arg);
+				ret = pthread_create(&d->thread,0,senderThread,d);
+				assert(ret == 0);
+			} else  {
+				debugmsg("outputThread: ignoring destination %s\n",d->arg);
+				d->name = 0;
+			}
+			d = d->next;
+		} while (d);
+	}
+	dest->result = 0;
+	out = dest->fd;
+	infomsg("outputThread: starting output on %s...\n",dest->arg);
 	for (;;) {
 		unsigned long long rest = blocksize;
 		int err;
@@ -778,68 +1162,89 @@ static void *outputThread(void *ignored)
 		if (Terminate) {
 			(void) pthread_cancel(Reader);
 			debugmsg("outputThread: terminating upon termination request...\n");
-			if (-1 == close(Out)) 
-				errormsg("error closing output: %s\n",strerror(errno));;
-			pthread_exit(0);
+			if (-1 == close(dest->fd)) 
+				errormsg("error closing output %s: %s\n",dest->arg,strerror(errno));;
+			dest->result = "canceled";
+			pthread_exit((void*)1);
 		}
-		if (Finish) {
-			debugmsg("outputThread: inputThread finished, %d blocks remaining\n",fill);
-			err = sem_getvalue(&Buf2Dev,&fill);
-			assert(err == 0);
-			if ((0 == Rest) && (0 == fill)) {
+		if (Finish == at) {
+			if (0 == Rest) {
+				syncSenders((char*)0xdeadbeef,0);
 				infomsg("outputThread: finished - exiting...\n");
-				pthread_exit(0);
-			} else if (0 == fill) {
+				pthread_exit((void*)haderror);
+			} else {
 				blocksize = rest = Rest;
-				debugmsg("outputThread: last block has %d bytes\n",Rest);
+				debugmsg("outputThread: last block has %llu bytes\n",Rest);
 			}
 		}
+		syncSenders(Buffer[at],blocksize);
 		/* switch output volume if -D <size> has been reached */
 		if ( (OutVolsize != 0) && (Numout > 0) && (Numout % (OutVolsize/Blocksize)) == 0 ) {
 			/* Sleep to let status thread "catch up" so that the displayed total is a multiple of OutVolsize */
 			(void) mt_usleep(500000);
-			requestOutputVolume();
+			out = requestOutputVolume(out,dest->name);
+			if (out == -1) {
+				haderror = 1;
+				dest->result = strerror(errno);
+			}
 		}
 		do {
 			/* use Outsize which could be the blocksize of the device (option -d) */
 			int num;
+			if (haderror) {
+				if (NumSenders == 0)
+					Terminate = 1;
+				num = (int)rest;
+			} else
 #ifdef HAVE_SENDFILE
 			if (Sendout) {
 				off_t baddr = (off_t) Buffer[at] + blocksize - rest;
-				num = sendfile(Out,SFV_FD_SELF,&baddr,rest > Outsize ? Outsize : rest);
-#ifdef DEBUG
-				debugmsg("outputThread: sendfile(Out, SFV_FD_SELF, Buffer[%d] + %llu, %llu) = %d\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, num);
-#endif
+				num = sendfile(out,SFV_FD_SELF,&baddr,rest > Outsize ? Outsize : rest);
+				debugmsg("outputThread: sendfile(out, SFV_FD_SELF, &(Buffer[%d] + %llu), %llu) = %d\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, num);
 			} else
 #endif
 			{
-				num = write(Out,Buffer[at] + blocksize - rest, rest > Outsize ? Outsize : rest);
-#ifdef DEBUG
-				debugmsg("outputThread: write(Out, Buffer[%d] + %llu, %d) = %d\t(rest = %d)\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, num, rest);
-#endif
+				num = write(out,Buffer[at] + blocksize - rest, rest > Outsize ? Outsize : rest);
+				debugmsg("outputThread: writing %lld@%p - ret = %d\n",rest > Outsize ? Outsize : rest,Buffer[at] + blocksize - rest,num);
 			}
 			if ((-1 == num) && (Terminal||Autoloader) && ((errno == ENOMEM) || (errno == ENOSPC))) {
 				/* request a new volume - but first check
-				 * wheather we are really at the
+				 * whether we are really at the
 				 * end of the device */
-				checkIncompleteOutput();
+				out = checkIncompleteOutput(out,dest->name);
+				if (out == -1)
+					haderror = 1;
 				continue;
 			} else if (-1 == num) {
-				errormsg("outputThread: error writing at offset %llx: %s\n",Blocksize*Numout+blocksize-rest,strerror(errno));
-				Terminate = 1;
-				err = sem_post(&Dev2Buf);
-				assert(err == 0);
-				pthread_exit((void *) -1);
+				dest->result = strerror(errno);
+				errormsg("outputThread: error writing to %s at offset 0x%llx: %s\n",dest->arg,(long long)Blocksize*Numout+blocksize-rest,strerror(errno));
+				MainOutOK = 0;
+				if (NumSenders == 0) {
+					debugmsg("outputThread: terminating...\n");
+					Terminate = 1;
+					err = sem_post(&Dev2Buf);
+					assert(err == 0);
+					pthread_exit((void *) -1);
+				}
+				debugmsg("outputThread: %d senders remaining - continuing...\n",NumSenders);
+				haderror = 1;
 			}
 			rest -= num;
 		} while (rest > 0);
-		err = sem_post(&Dev2Buf);
-		assert(err == 0);
+		if (Dest->next == 0) {
+			err = sem_post(&Dev2Buf);
+			assert(err == 0);
+		}
 		if (MaxWriteSpeed) {
 			xfer = enforceSpeedLimit(MaxWriteSpeed,xfer,&last);
 		}
 		if (Pause)
 			(void) mt_usleep(Pause);
+		if (Finish == at) {
+			syncSenders((char*)0xdeadbeef,0);
+			terminateOutputThread(dest);
+			return 0;	/* make lint happy */
+		}
 		at++;
 		if (Numblocks == at)
 			at = 0;
@@ -847,10 +1252,6 @@ static void *outputThread(void *ignored)
 		assert(err == 0);
 		err = sem_getvalue(&Buf2Dev,&fill);
 		assert(err == 0);
-		if (Finish && (0 == fill)) {
-			terminateOutputThread();
-			return 0;	/* make lint happy */
-		}
 		if ((startread < 1) && ((double)fill / (double)Numblocks) < startread) {
 			err = pthread_cond_signal(&PercLow);
 			assert(err == 0);
@@ -871,14 +1272,14 @@ static void openNetworkInput(const char *host, unsigned short port)
 	struct hostent *h = 0, *r = 0;
 	const int reuse_addr = 1;
 
-	debugmsg("openNetworkInput(%s,%hu)\n",host,port);
+	debugmsg("openNetworkInput(\"%s\",%hu)\n",host,port);
 	infomsg("creating socket for network input...\n");
 	Sock = socket(AF_INET, SOCK_STREAM, 6);
 	if (0 > Sock)
 		fatal("could not create socket for network input: %s\n",strerror(errno));
 	if (-1 == setsockopt(Sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr)))
 		warningmsg("cannot set socket to reuse address: %s\n",strerror(errno));
-	if (host) {
+	if (host[0]) {
 		debugmsg("resolving hostname of input interface...\n");
 		if (0 == (h = gethostbyname(host)))
 #ifdef HAVE_HSTRERROR
@@ -891,7 +1292,7 @@ static void openNetworkInput(const char *host, unsigned short port)
 	saddr.sin_family = AF_INET;
 	saddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	saddr.sin_port = htons(port);
-	infomsg("binding socket...\n");
+	infomsg("binding socket to port %d...\n",port);
 	if (0 > bind(Sock, (struct sockaddr *) &saddr, sizeof(saddr)))
 		fatal("could not bind to socket for network input: %s\n",strerror(errno));
 	infomsg("listening on socket...\n");
@@ -903,53 +1304,24 @@ static void openNetworkInput(const char *host, unsigned short port)
 		In = accept(Sock, (struct sockaddr *)&caddr, &clen);
 		if (0 > In)
 			fatal("could not accept connection for network input: %s\n",strerror(errno));
-		if (host == 0) {
-			infomsg("connection accepted\n");
+		if (host[0] == 0) {
+			infomsg("accepted connection from %s\n",inet_ntoa(caddr.sin_addr));
 			return;
 		}
 		for (p = h->h_addr_list; *p; ++p) {
 			if (0 == memcmp(&caddr.sin_addr,*p,h->h_length)) {
-				infomsg("connection accepted\n");
+				infomsg("accepted connection from %s\n",inet_ntoa(caddr.sin_addr));
 				return;
 			}
 		}
 		r = gethostbyaddr((char *)&caddr.sin_addr,sizeof(caddr.sin_addr.s_addr),AF_INET);
 		if (r)
-			errormsg("rejected connection from %s (%s)\n",r->h_name,inet_ntoa(caddr.sin_addr));
+			warningmsg("rejected connection from %s (%s)\n",r->h_name,inet_ntoa(caddr.sin_addr));
 		else
-			errormsg("rejected connection from %s\n",inet_ntoa(caddr.sin_addr));
+			warningmsg("rejected connection from %s\n",inet_ntoa(caddr.sin_addr));
 		if (-1 == close(In))
-			errormsg("error closing input: %s\n",strerror(errno));
+			warningmsg("error closing rejected input: %s\n",strerror(errno));
 	}
-}
-
-
-
-static void openNetworkOutput(const char *host, unsigned short port)
-{
-	struct sockaddr_in saddr;
-	struct hostent *h = 0;
-
-	debugmsg("openNetworkOutput(%s,%hu)\n",host,port);
-	infomsg("creating socket for network output...\n");
-	Out = socket(AF_INET, SOCK_STREAM, 6);
-	if (0 > Out)
-		fatal("could not create socket for network output: %s\n",strerror(errno));
-	bzero((void *) &saddr, sizeof(saddr));
-	saddr.sin_port = htons(port);
-	infomsg("resolving server host...\n");
-	if (0 == (h = gethostbyname(host)))
-#ifdef HAVE_HSTRERROR
-		fatal("could not resolve server hostname: %s\n",hstrerror(h_errno));
-#else
-		fatal("could not resolve server hostname: error code %d\n",h_errno);
-#endif
-	saddr.sin_family = h->h_addrtype;
-	assert(h->h_length <= sizeof(saddr.sin_addr));
-	(void) memcpy(&saddr.sin_addr,h->h_addr_list[0],h->h_length);
-	infomsg("connecting to server (%x)...\n",saddr.sin_addr);
-	if (0 > connect(Out, (struct sockaddr *) &saddr, sizeof(saddr)))
-		fatal("could not connect to server: %s\n",strerror(errno));
 }
 
 
@@ -984,7 +1356,11 @@ static void version(void)
 	(void) fprintf(stderr,
 		"mbuffer version "VERSION"\n"\
 		"Copyright 2001-2008 - T. Maier-Komor\n"\
-		"License: GPL2 - see file COPYING\n");
+		"License: GPLv3 - see file LICENSE\n"\
+		"This program comes with ABSOLUTELY NO WARRANTY!!!\n"
+		"Donations via PayPal to thomas@maier-komor.de are welcome and support this work!\n"
+		"\n"
+		);
 	exit(EXIT_SUCCESS);
 }
 
@@ -992,28 +1368,34 @@ static void version(void)
 
 static void usage(void)
 {
+	const char *dim = "bkMGTP";
+	unsigned long long m = Numblocks * Blocksize;
+	while (m >= 10000) {
+		m >>= 10;
+		++dim;
+	}
 	(void) fprintf(stderr,
 		"usage: mbuffer [Options]\n"
 		"Options:\n"
-		"-b <num>   : use <num> blocks for buffer (default %llu)\n"
-		"-s <size>  : use block of <size> bytes for buffer (default %llu)\n"
-#ifdef _SC_PHYS_PAGES
-		"-m <size>  : use buffer of a total of <size> bytes\n"
+		"-b <num>   : use <num> blocks for buffer (default: %d)\n"
+		"-s <size>  : use block of <size> bytes for buffer (default: %llu)\n"
+#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__)
+		"-m <size>  : memory <size> of buffer in b,k,M,G,%% (default: 2%% = %llu%c)\n"
+#else
+		"-m <size>  : memory <size> of buffer in b,k,M,G,%% (default: %llu%c)\n"
 #endif
 #ifdef _POSIX_MEMLOCK_RANGE
 		"-L         : lock buffer in memory (unusable with file based buffers)\n"
 #endif
-#ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 		"-d         : use blocksize of device for output\n"
-#endif
 		"-D <size>  : assumed device size (default: infinite)\n"
 		"-P <num>   : start writing after buffer has been filled more than <num>%%\n"
 		"-p <num>   : start reading after buffer has been filled less than <num>%%\n"
 		"-i <file>  : use <file> for input\n"
-		"-o <file>  : use <file> for output\n"
+		"-o <file>  : use <file> for output (this option can be passed MULTIPLE times)\n"
 		"-I <h>:<p> : use network port <port> as input, allow only host <h> to connect\n"
 		"-I <p>     : use network port <port> as input\n"
-		"-O <h>:<p> : output data to host <h> and port <p>\n"
+		"-O <h>:<p> : output data to host <h> and port <p> (MUTLIPLE outputs supported)\n"
 		"-n <num>   : <num> volumes for input\n"
 		"-t         : use memory mapped temporary file (for huge buffer)\n"
 		"-T <file>  : as -t but uses <file> as buffer\n"
@@ -1033,8 +1415,11 @@ static void usage(void)
 #endif
 		"-V\n"
 		"--version  : print version information\n"
-		"Unsupported buffer options: -t -Z -B\n",
-		Numblocks,Blocksize);
+		"Unsupported buffer options: -t -Z -B\n"
+		,Numblocks
+		,Blocksize
+		,m,*dim
+		);
 	exit(EXIT_SUCCESS);
 }
 
@@ -1059,6 +1444,9 @@ static unsigned long long calcint(const char **argv, int c, unsigned long long d
 			return i;
 		case 'G':
 			i <<= 30;
+			return i;
+		case 'T':
+			i <<= 40;
 			return i;
 		case '%':
 			if (i >= 100)
@@ -1108,20 +1496,30 @@ int main(int argc, const char **argv)
 	sigset_t       signalSet;
 #ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 	struct stat st;
-	int setOutsize = 0;
 #endif
 	unsigned short netPortIn = 0;
-	const char *server = 0, *client = 0;
+	const char *client = 0;
 	unsigned short netPortOut = 0;
 	char *argv0 = strdup(argv[0]), *progname;
-	
+	const char *outfile = 0;
+	struct sigaction sig;
+	dest_t *dest = 0;
+#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__)
+	long pgsz, nump;
+
+	pgsz = sysconf(_SC_PAGESIZE);
+	assert(pgsz > 0);
+	nump = sysconf(_SC_AVPHYS_PAGES);
+	assert(nump > 0);
+	Blocksize = pgsz;
+	Numblocks = nump/50;
+#endif
 	progname = basename(argv0);
 	PrefixLen = strlen(progname) + 2;
-	Msg = malloc(PrefixLen + MSGSIZE);
-	(void) strcpy(Msg,progname);
-	Msg[PrefixLen - 2] = ':';
-	Msg[PrefixLen - 1] = ' ';
-	Msgbuf = Msg + PrefixLen;
+	Prefix = malloc(PrefixLen);
+	(void) strcpy(Prefix,progname);
+	Prefix[PrefixLen - 2] = ':';
+	Prefix[PrefixLen - 1] = ' ';
 	Log = STDERR_FILENO;
 	for (c = 1; c < argc; c++) {
 		if (!argcheck("-s",argv,&c,argc)) {
@@ -1130,28 +1528,24 @@ int main(int argc, const char **argv)
 			debugmsg("Blocksize = %llu\n",Blocksize);
 			if (Blocksize < 100)
 				fatal("cannot set blocksize as percentage of total physical memory\n");
-#ifdef _SC_PHYS_PAGES
 		} else if (!argcheck("-m",argv,&c,argc)) {
 			totalmem = calcint(argv,c,totalmem);
 			optMset = 1;
 			if (totalmem < 100) {
-				long pgsz, nump;
-				pgsz = sysconf(_SC_PAGESIZE);
-				assert(pgsz > 0);
-				nump = sysconf(_SC_PHYS_PAGES);
-				assert(nump > 0);
-				debugmsg("total # of phys pages: %li (pagesize %li)\n",nump,pgsz);
+#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__)
 				totalmem = ((unsigned long long) nump * pgsz * totalmem) / 100 ;
+#else
+				fatal("Unable to determine page size or amount of available memory - please specify an absolute amount of memory.\n");
+#endif
 			}
 			debugmsg("totalmem = %llu\n",totalmem);
-#endif
 		} else if (!argcheck("-b",argv,&c,argc)) {
 			Numblocks = (atoi(argv[c])) ? ((unsigned long long) atoll(argv[c])) : Numblocks;
 			optBset = 1;
 			debugmsg("Numblocks = %llu\n",Numblocks);
 		} else if (!argcheck("-d",argv,&c,argc)) {
 #ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
-			setOutsize = 1;
+			SetOutsize = 1;
 			debugmsg("setting output size according to the blocksize of the device\n");
 #else
 			fatal("cannot determine blocksize of device (unsupported by OS)\n");
@@ -1161,6 +1555,10 @@ int main(int argc, const char **argv)
 				fatal("missing argument for option -v");
 			Verbose = (atoi(argv[c])) ? (atoi(argv[c])) : Verbose;
 			debugmsg("Verbose = %d\n",Verbose);
+#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__)
+			debugmsg("total # of phys pages: %li (pagesize %li)\n",nump,pgsz);
+#endif
+			debugmsg("default buffer set to %d blocks of %lld bytes\n",Numblocks,Blocksize);
 		} else if (!argcheck("-u",argv,&c,argc)) {
 			Pause = (atoi(argv[c])) ? (atoi(argv[c])) * 1000 : Pause;
 			debugmsg("Pause = %d\n",Pause);
@@ -1179,14 +1577,40 @@ int main(int argc, const char **argv)
 			Infile = argv[c];
 			debugmsg("Infile = %s\n",Infile);
 		} else if (!argcheck("-o",argv,&c,argc)) {
-			Outfile = argv[c];
-			debugmsg("Outfile = \"%s\"\n",Outfile);
+			debugmsg("output file: %s\n",argv[c]);
+			dest_t *dest = malloc(sizeof(dest_t));
+			dest->arg = argv[c];
+			dest->port = -1;
+			dest->name = argv[c];
+			dest->result = 0;
+			dest->next = Dest;
+			bzero(&dest->thread,sizeof(dest->thread));
+			Dest = dest;
+			if (outfile == 0)
+				outfile = argv[c];
+			++NumSenders;
 		} else if (!argcheck("-I",argv,&c,argc)) {
 			getNetVars(argv,&c,&client,&netPortIn);
+			if (client == 0)
+				client = "";
 			debugmsg("Network input set to %s:%hu\n",client,netPortIn);
 		} else if (!argcheck("-O",argv,&c,argc)) {
-			getNetVars(argv,&c,&server,&netPortOut);
-			debugmsg("Output: server = %s, port = %hu\n",server,netPortOut);
+			const char *s = 0;
+			unsigned short p = 0;
+			getNetVars(argv,&c,&s,&p);
+			debugmsg("Output: server = %s, port = %hu\n",s,p);
+			if ((0 == p) ^ (0 == s))
+				fatal("When sending data to a network destination, both hostname and port must be set!\n");
+			debugmsg("network output: %s:%d\n",s,p);
+			dest_t *dest = malloc(sizeof(dest_t));
+			dest->arg = argv[c];
+			dest->name = s;
+			dest->port = p;
+			dest->result = 0;
+			dest->next = Dest;
+			bzero(&dest->thread,sizeof(dest->thread));
+			Dest = dest;
+			++NumSenders;
 			Sendout = 1;
 		} else if (!argcheck("-T",argv,&c,argc)) {
 			Tmpfile = malloc(strlen(argv[c]) + 1);
@@ -1199,7 +1623,7 @@ int main(int argc, const char **argv)
 			Memmap = 1;
 			debugmsg("mm = 1\n");
 		} else if (!argcheck("-l",argv,&c,argc)) {
-			Log = open(argv[c],O_WRONLY|O_TRUNC|O_CREAT|LARGEFILE,0666);
+			Log = open(argv[c],O_WRONLY|O_APPEND|O_TRUNC|O_CREAT|LARGEFILE,0666);
 			if (-1 == Log) {
 				Log = STDERR_FILENO;
 				errormsg("error opening log file: %s\n",strerror(errno));
@@ -1282,28 +1706,28 @@ int main(int argc, const char **argv)
 	}
 	if ((StartRead < 1) && (StartWrite > 0))
 		fatal("setting both low watermark and high watermark doesn't make any sense...\n");
+	if ((NumSenders > 0) && (Autoloader || OutVolsize))
+		fatal("multi-volume support is unsupported with multiple outputs\n");
 	if (Autoloader) {
-		if ((!Outfile) && (!Infile))
+		if ((!outfile) && (!Infile))
 			fatal("Setting autoloader time without using a device doesn't make any sense!\n");
-		if (Outfile && Infile) {
+		if (outfile && Infile) {
 			fatal("Which one is your autoloader? Input or output? Replace input or output with a pipe.\n");
 		}
 	}
 	if (Infile && netPortIn)
 		fatal("Setting both network input port and input file doesn't make sense!\n");
-	if (Outfile && netPortOut)
+	if (outfile && netPortOut)
 		fatal("Setting both network output and output file doesn't make sense!\n");
 	if ((0 != client) && (0 == netPortIn))
 		fatal("You need to set a network port for network input!\n");
-	if ((0 == netPortOut) ^ (0 == server))
-		fatal("When sending data to a server, both servername and port must be set!\n");
 
 	/* multi volume input consistency checking */
 	if ((Multivolume) && (!Infile))
 		fatal("multi volume support for input needs an explicit given input device (option -i)\n");
 
 	/* SPW: Volsize consistency checking */
-	if (OutVolsize && !Outfile)
+	if (OutVolsize && !outfile)
 		fatal("Setting OutVolsize without an output device doesn't make sense!\n");
 	if ( (OutVolsize != 0) && (OutVolsize < Blocksize) )
 		/* code assumes we can write at least one block */
@@ -1314,15 +1738,16 @@ int main(int argc, const char **argv)
 	mxnrsem = sysconf(_SC_SEM_VALUE_MAX);
 	if (-1 == mxnrsem) {
 		warningmsg("unable to determine maximum value of semaphores\n");
-	} else if (Numblocks > (unsigned long long) mxnrsem)
+	} else if (Numblocks > (unsigned long long) mxnrsem) {
 		fatal("cannot allocate more than %d blocks.\nThis is a system dependent limit, depending on the maximum semaphore value.\nPlease choose a bigger block size.\n",mxnrsem);
+	}
 
 	if (Blocksize * Numblocks > SSIZE_MAX)
 		fatal("Cannot address so much memory (%lld*%lld=%lld>%lld).\n",Blocksize,Numblocks, Blocksize*Numblocks,SSIZE_MAX);
 	/* create buffer */
 	Buffer = (char **) memalign(sysconf(_SC_PAGESIZE),Numblocks * sizeof(char *));
 	if (!Buffer)
-		fatal("Could not allocate enough memory: %s\n",strerror(errno));
+		fatal("Could not allocate enough memory (%lld requested): %s\n",Numblocks * sizeof(char *),strerror(errno));
 	if (Memmap) {
 		infomsg("mapping temporary file to memory with %llu blocks with %llu byte (%llu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
 		if (!Tmpfile) {
@@ -1358,10 +1783,10 @@ int main(int argc, const char **argv)
 			fatal("could not map buffer-file to memory: %s\n",strerror(errno));
 		debugmsg("temporary file mapped to address %p\n",Buffer[0]);
 	} else {
-		infomsg("allocating memory for %llu blocks with %llu byte (%llu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
+		infomsg("allocating memory for %d blocks with %llu byte (%llu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
 		Buffer[0] = (char *) valloc(Blocksize * Numblocks);
 		if (Buffer[0] == 0)
-			fatal("Could not allocate enough memory: %s\n",strerror(errno));
+			fatal("Could not allocate enough memory (%lld requested): %s\n",strerror(errno));
 	}
 	for (c = 1; c < Numblocks; c++) {
 		Buffer[c] = Buffer[0] + Blocksize * c;
@@ -1389,61 +1814,67 @@ int main(int argc, const char **argv)
 	debugmsg("creating semaphores...\n");
 	if (0 != sem_init(&Buf2Dev,0,0))
 		fatal("Error creating semaphore Buf2Dev: %s\n",strerror(errno));
-	if (0 != sem_init(&Dev2Buf,0,Numblocks))
+	if (0 != sem_init(&Dev2Buf,0,Dest ? Numblocks - 1 : Numblocks))
 		fatal("Error creating semaphore Dev2Buf: %s\n",strerror(errno));
 
-	debugmsg("opening streams...\n");
+	debugmsg("opening input...\n");
 	if (Infile) {
 		if (-1 == (In = open(Infile,O_RDONLY|LARGEFILE)))
 			fatal("could not open input file: %s\n",strerror(errno));
 	} else if (netPortIn) {
 		openNetworkInput(client,netPortIn);
-	} else
-		In = fileno(stdin);
+	} else {
+		In = STDIN_FILENO;
+	}
 #ifdef __sun
-	if (-1 == directio(In,DIRECTIO_ON))
+	if (0 == directio(In,DIRECTIO_ON))
+		infomsg("direct I/O hinting enabled for input\n");
+	else
 		infomsg("direct I/O hinting failed for input: %s\n",strerror(errno));
 #endif
-	if (Outfile) {
-		mode_t mode = O_WRONLY|O_TRUNC|OptSync|LARGEFILE;
-		if (strncmp(Outfile,"/dev/",5))
-			mode |= Nooverwrite|O_CREAT;
-		if (-1 == (Out = open(Outfile,mode,0666)))
-			fatal("could not open output file: %s\n",strerror(errno));
-	} else if (netPortOut) {
-		openNetworkOutput(server,netPortOut);
-	} else
-		Out = fileno(stdout);
-#ifdef __sun
-	if (-1 == directio(Out,DIRECTIO_ON))
-		infomsg("direct I/O hinting failed for output: %s\n",strerror(errno));
-#endif
-
-#ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
-	debugmsg("checking output device...\n");
-	if (-1 == fstat(Out,&st))
-		fatal("could not stat output: %s\n",strerror(errno));
-	if (S_ISBLK(st.st_mode) || S_ISCHR(st.st_mode)) {
-		infomsg("blocksize is %d bytes on output device\n",st.st_blksize);
-		if ((Blocksize < st.st_blksize) || (Blocksize % st.st_blksize != 0)) {
-			warningmsg("Blocksize should be a multiple of the blocksize of the output device!\n"
-				"This can cause problems with some device/OS combinations...\n"
-				"Blocksize on output device is %d (transfer block size is %lld)\n", st.st_blksize, Blocksize);
-			if (setOutsize)
-				fatal("unable to set output blocksize\n");
-		} else {
-			if (setOutsize) {
-				infomsg("setting output blocksize to %d\n",st.st_blksize);
-				Outsize = st.st_blksize;
+	if (Dest) {
+		dest_t *d = Dest;
+		do {
+			if (d->port != -1) {
+				openNetworkOutput(d);
+			} else {
+				mode_t mode = O_WRONLY|O_TRUNC|OptSync|LARGEFILE;
+				if (strncmp(outfile,"/dev/",5))
+					mode |= Nooverwrite|O_CREAT;
+				d->fd = open(outfile,mode,0666);
+				if (-1 == d->fd) {
+					d->result = strerror(errno);
+					errormsg("unable to open output %s: %s\n",d->arg,strerror(errno));
+				}
 			}
-		}
-	} else
-		infomsg("no device on output stream\n");
-#else
-	warningmsg("Could not stat output device (unsupported by system)!\n"
-		   "This can result in incorrect written data when\n"
-		   "using multiple volumes. Continue at your own risk!\n");
+			if (-1 == d->fd) {
+				d->name = 0;	/* tag destination as unstartable */
+				--NumSenders;
+			}
+#ifdef __sun
+			else if (0 == directio(d->fd,DIRECTIO_ON))
+				infomsg("direct I/O hinting enabled for output to %s\n",d->arg);
+			else
+				infomsg("direct I/O hinting failed for output to %s: %s\n",d->arg,strerror(errno));
 #endif
+			d = d->next;
+		} while (d);
+		if (NumSenders == -1) {
+			debugmsg("no output left - nothing to do\n");
+			exit(EXIT_FAILURE);
+		}
+	} else {
+		Dest = malloc(sizeof(dest_t));
+		Dest->fd = STDOUT_FILENO;
+		Dest->name = "<stdout>";
+		Dest->arg = "<stdout>";
+		Dest->port = -1;
+		Dest->result = 0;
+		Dest->next = 0;
+		bzero(&Dest->thread,sizeof(Dest->thread));
+		NumSenders = 0;
+	}
+
 	debugmsg("checking if we have a controlling terminal...\n");
 	fl = fcntl(STDERR_FILENO,F_GETFL);
 	err = fcntl(STDERR_FILENO,F_SETFL,fl | O_NONBLOCK);
@@ -1464,17 +1895,59 @@ int main(int argc, const char **argv)
 	assert(err == 0);
 
 	debugmsg("registering signals...\n");
-	if (SIG_ERR == signal(SIGINT,sigHandler))
+	sig.sa_handler = sigHandler;
+	sigemptyset(&sig.sa_mask);
+	sigaddset(&sig.sa_mask,SIGINT);
+	sig.sa_flags = SA_RESTART;
+	if (0 != sigaction(SIGINT,&sig,0))
 		warningmsg("error registering new SIGINT handler: %s\n",strerror(errno));
-	if (SIG_ERR == signal(SIGTERM,sigHandler))
-		warningmsg("error registering new SIGINT handler: %s\n",strerror(errno));
+	sigemptyset(&sig.sa_mask);
+	sigaddset(&sig.sa_mask,SIGTERM);
+	if (0 != sigaction(SIGTERM,&sig,0))
+		warningmsg("error registering new SIGTERM handler: %s\n",strerror(errno));
 
 	debugmsg("starting threads...\n");
 	(void) gettimeofday(&Starttime,0);
 	err = sigfillset(&signalSet);
 	assert(0 == err);
 	(void) pthread_sigmask(SIG_BLOCK, &signalSet, NULL);
-	err = pthread_create(&Writer,0,&outputThread,0);
+
+	/* select destination for output thread */
+	dest = Dest;
+	while (dest->fd == -1) {
+		dest->name = 0;
+		debugmsg("skipping destination %s\n",dest->arg);
+		assert(dest->next);
+		dest = dest->next;
+	}
+
+#ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
+	debugmsg("checking output device...\n");
+	if (-1 == fstat(dest->fd,&st))
+		errormsg("could not stat output: %s\n",strerror(errno));
+	else if (S_ISBLK(st.st_mode) || S_ISCHR(st.st_mode)) {
+		infomsg("blocksize is %d bytes on output device\n",st.st_blksize);
+		if ((Blocksize < st.st_blksize) || (Blocksize % st.st_blksize != 0)) {
+			warningmsg("Blocksize should be a multiple of the blocksize of the output device!\n"
+				"This can cause problems with some device/OS combinations...\n"
+				"Blocksize on output device is %d (transfer block size is %lld)\n", st.st_blksize, Blocksize);
+			if (SetOutsize)
+				fatal("unable to set output blocksize\n");
+		} else {
+			if (SetOutsize) {
+				infomsg("setting output blocksize to %d\n",st.st_blksize);
+				Outsize = st.st_blksize;
+			}
+		}
+	} else
+		infomsg("no device on output stream\n");
+#else
+	warningmsg("Could not stat output device (unsupported by system)!\n"
+		   "This can result in incorrect written data when\n"
+		   "using multiple volumes. Continue at your own risk!\n");
+#endif
+
+	err = pthread_create(&dest->thread,0,&outputThread,dest);
 	assert(0 == err);
 	err = pthread_create(&Reader,0,&inputThread,0);
 	assert(0 == err);
@@ -1484,12 +1957,31 @@ int main(int argc, const char **argv)
 	else {
 		struct timeval now;
 		double diff;
-
+		int numthreads = 0;
+		dest_t *d = Dest;
 		(void) pthread_join(Reader,0);
-		(void) pthread_join(Writer,0);
+		do {
+			dest_t *n = d->next;
+			void *status;
+			if (d->name) {
+				(void) pthread_join(d->thread,&status);
+				if (status == 0)
+					++numthreads;
+			}
+			free(d);
+			d = n;
+		} while (d);
 		(void) gettimeofday(&now,0);
 		diff = now.tv_sec - Starttime.tv_sec + (double) now.tv_usec / 1000000 - (double) Starttime.tv_usec / 1000000;
-		summary(Numout * Blocksize + Rest, diff);
+		summary(Numout * Blocksize + Rest, diff, numthreads);
+	}
+	if (Dest) {
+		dest_t *d = Dest;
+		do {
+			if (d->result)
+				warningmsg("error during output to %s: %s\n",d->arg,d->result);
+			d = d->next;
+		} while (d);
 	}
 	if (ErrorOccured)
 		exit(EXIT_FAILURE);

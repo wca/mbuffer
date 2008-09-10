@@ -5,21 +5,36 @@ AC_CANONICAL_SYSTEM
 AC_EXEEXT
 
 PACKAGE=mbuffer
-VERSION=20080507
+VERSION=20080910
+
+if test "${LD_LIBRARY_PATH}" != "" ; then
+	echo ""
+	echo "    WARNING: LD_LIBRARY_PATH is set. This can cause severe problems!!!"
+	echo "    Please learn about using RUNPATH instead of LD_LIBRARY_PATH - e.g. here:"
+	echo "    - http://prefetch.net/articles/linkers.badldlibrary.html"
+	echo "    - http://blogs.sun.com/ali/entry/avoiding_ld_library_path_the"
+	echo "    For gcc, you can pass LDFLAGS=\"-R/usr/local/lib\" to configure,"
+	echo "    instead of setting LD_LIBRARY_PATH."
+	echo ""
+	sleep 5
+fi
 
 AC_PREFIX_DEFAULT(/usr/local)
 test "$prefix" = NONE && prefix=/usr/local
 test "$exec_prefix" = NONE && exec_prefix=$prefix
 
+USRCFLAGS=$CFLAGS
 
 AC_LANG_C
-CFLAGS="${CFLAGS=-g -O}"
-AC_SUBST(CFLAGS)
 AC_PROG_CC(cc gcc)
 AC_C_RESTRICT
 AC_C_INLINE
 AC_PROG_INSTALL
 AC_PATH_PROG(RM,rm)
+
+test "${USRCFLAGS}" = "" -a "${GCC}" = "yes" && CFLAGS="-g -O2 -Wall"
+test "${USRCFLAGS}" = "" -a "${GCC}" != "yes" && CFLAGS="-g -O"
+AC_SUBST(CFLAGS)
 
 AC_HEADER_ASSERT
 AC_CHECK_LIB(pthread, pthread_mutex_init)
@@ -42,7 +57,7 @@ AC_CHECK_HEADER(sys/sendfile.h,AC_DEFINE(HAVE_SENDFILE_H,1,sendfile in sendfile.
 
 
 AC_ARG_ENABLE(debug,
-        --disable-debug           disable verbose logging to console for debugging purpose,
+        [  --disable-debug         disable verbose logging to console for debugging purpose],
         ,enable_debug=yes
         )
 if test x$enable_debug = xyes ; then
@@ -50,7 +65,7 @@ if test x$enable_debug = xyes ; then
 fi
 
 AC_ARG_ENABLE(md5,
-        --disable-md5             disable md5 hash generation,
+        [  --disable-md5           disable md5 hash generation],
 	,enable_md5=auto
 	)
 if test x$enable_md5 != xno ; then
@@ -71,6 +86,7 @@ AC_DEFINE_UNQUOTED(PACKAGE,"${PACKAGE}")
 AC_DEFINE_UNQUOTED(VERSION,"${VERSION}")
 AC_SUBST(PACKAGE)
 AC_SUBST(VERSION)
+AC_SUBST(prefix)
 AC_SUBST(AUTOCONF)
 AC_DEFINE(_REENTRANT,1,Needed for thread safe compilation)
 
