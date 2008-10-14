@@ -18,6 +18,7 @@
  */
 
 #include "config.h"
+#define _GNU_SOURCE 1
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -88,6 +89,12 @@
 #define LARGEFILE 0
 #endif
 
+#ifdef O_DIRECT
+#define DIRECT O_DIRECT
+#else
+#define DIRECT 0
+#endif
+
 static pthread_t Reader;
 static long Verbose = 3, In = 0, Tmp = 0, Pause = 0, Memmap = 0,
 	Status = 1, Nooverwrite = O_EXCL, Outblocksize = 0,
@@ -112,7 +119,7 @@ static double StartWrite = 0, StartRead = 1;
 static char *Tmpfile = 0, **Buffer, *Prefix;
 static const char *Infile = 0, *Autoload_cmd = 0;
 static int Multivolume = 0, Memlock = 0, Sendout = 0, PrefixLen = 0,
-	   Numblocks = 512, SetOutsize = 0;
+	   Direct = 0, Numblocks = 512, SetOutsize = 0;
 #ifdef HAVE_LIBMHASH
 static MHASH MD5hash;
 #elif defined HAVE_LIBMD5
@@ -120,28 +127,39 @@ static MD5_CTX md5ctxt;
 #elif defined HAVE_LIBCRYPTO
 static MD5_CTX md5ctxt;
 #endif
-static sem_t Dev2Buf, Buf2Dev;
+
+#ifdef __sun
+#include <synch.h>
+#define sem_t sema_t
+#define sem_init(a,b,c) sema_init(a,c,USYNC_THREAD,0)
+#define sem_wait sema_wait
+#define sem_post sema_post
+#define sem_getvalue(a,b) ((*(b) = (a)->count), 0)
+#endif
+
+static sem_t Dev2Buf, Buf2Dev, Done;
 static pthread_cond_t
 	PercLow = PTHREAD_COND_INITIALIZER,	/* low watermark */
 	PercHigh = PTHREAD_COND_INITIALIZER,	/* high watermark */
 	SendCond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t
+#if !defined(__sun) || defined(__linux)
+	LogMut = PTHREAD_MUTEX_INITIALIZER,
+#endif
 	TermMut = PTHREAD_MUTEX_INITIALIZER,	/* prevents statusThread from interfering with request*Volume */
 	LowMut = PTHREAD_MUTEX_INITIALIZER,
 	HighMut = PTHREAD_MUTEX_INITIALIZER,
-#if !defined(__sun)
-	LogMut = PTHREAD_MUTEX_INITIALIZER,
-#endif
 	SendMut = PTHREAD_MUTEX_INITIALIZER;
-static int Log = -1;
-static int Terminal = 1;
+static int Log = -1, Terminal = 1;
 static struct timeval Starttime;
+
 typedef struct destination {
 	const char *arg, *name, *result;
 	int port, fd;
 	pthread_t thread;
 	struct destination *next;
 } dest_t;
+
 static dest_t *Dest = 0;
 static char *volatile SendAt = 0;
 static volatile int SendSize = 0, ActSenders = 0;
@@ -398,23 +416,31 @@ static void summary(unsigned long long numb, double secs, int numthreads)
 
 
 
+static void cancelAll(void)
+{
+	dest_t *d = Dest;
+	do {
+		(void) pthread_cancel(d->thread);
+		if (d->result == 0)
+			d->result = "canceled";
+		d = d->next;
+	} while (d);
+	pthread_cancel(Reader);
+}
+
+
+
 static RETSIGTYPE sigHandler(int signr)
 {
+	int err;
+
 	switch (signr) {
-	case SIGTERM:
+	case SIGHUP:
 	case SIGINT:
-		{
-			int err;
-			dest_t *d = Dest;
-			while (d) {
-				(void) pthread_cancel(d->thread);
-				d = d->next;
-			}
-			err = pthread_cond_broadcast(&SendCond);
-			assert(err == 0);
-		}
 		ErrorOccured = 1;
 		Terminate = 1;
+		err = sem_post(&Done);
+		assert(err == 0);
 		break;
 	default:
 		(void) raise(SIGABRT);
@@ -501,17 +527,8 @@ static void statusThread(void)
 			break;
 	}
 	d = Dest;
-	if (Terminate) {
-		int err;
-		infomsg("\nterminating...\n");
-		do {
-			(void) pthread_cancel(d->thread);
-			d = d->next;
-		} while (d);
-		err = pthread_cond_broadcast(&SendCond);
-		assert(err == 0);
-		(void) pthread_cancel(Reader);
-	}
+	if (Terminate)
+		cancelAll();
 	infomsg("statusThread: joining to terminate...\n");
 	d = Dest;
 	do {
@@ -651,7 +668,10 @@ static void requestInputVolume(void)
 			err = pthread_mutex_unlock(&TermMut);
 			assert(0 == err);
 		}
-		if (-1 == (In = open(Infile,O_RDONLY|LARGEFILE)))
+		In = open(Infile, O_RDONLY | LARGEFILE | (Direct ? DIRECT : 0));
+		if ((-1 == In) && (errno == EINVAL))
+			In = open(Infile, O_RDONLY | (Direct ? DIRECT : 0));
+		if (-1 == In)
 			errormsg("could not reopen input: %s\n",strerror(errno));
 #ifdef __sun
 		if (-1 == directio(In,DIRECTIO_ON))
@@ -663,6 +683,14 @@ static void requestInputVolume(void)
 		char msg[] = "\nOK - continuing...\n";
 		(void) write(STDERR_FILENO,msg,sizeof(msg));
 	}
+}
+
+
+
+static void releaseLock(void *l)
+{
+	int err = pthread_mutex_unlock((pthread_mutex_t *)l);
+	assert(err == 0);
 }
 
 
@@ -688,8 +716,10 @@ static void *inputThread(void *ignored)
 		assert(err == 0);
 		if ((startread < 1) && (fill == Numblocks - 1)) {
 			debugmsg("inputThread: buffer full, waiting for it to drain.\n");
+			pthread_cleanup_push(releaseLock,&LowMut);
 			err = pthread_cond_wait(&PercLow,&LowMut);
 			assert(err == 0);
+			pthread_cleanup_pop(0);
 			++FullCount;
 			debugmsg("inputThread: low watermark reached, continuing...\n");
 		}
@@ -701,6 +731,8 @@ static void *inputThread(void *ignored)
 			debugmsg("inputThread: terminating early upon request...\n");
 			if (-1 == close(In))
 				errormsg("error closing input: %s\n",strerror(errno));
+			err = sem_post(&Done);
+			assert(err == 0);
 			pthread_exit((void *)1);
 			return 0;	/* just to make lint happy... */
 		}
@@ -732,6 +764,8 @@ static void *inputThread(void *ignored)
 				err = pthread_mutex_unlock(&HighMut);
 				assert(err == 0);
 				infomsg("inputThread: exiting...\n");
+				err = sem_post(&Done);
+				assert(err == 0);
 				pthread_exit((void *) -1);
 			} else if (0 == in) {
 				Rest = num;
@@ -756,6 +790,8 @@ static void *inputThread(void *ignored)
 				err = pthread_mutex_unlock(&HighMut);
 				assert(err == 0);
 				infomsg("inputThread: exiting...\n");
+				err = sem_post(&Done);
+				assert(err == 0);
 				pthread_exit(0);
 			}
 			num += in;
@@ -792,28 +828,26 @@ static void *inputThread(void *ignored)
 }
 
 
-
 static inline int syncSenders(char *b, int s)
 {
 	static volatile int size = 0;
 	static char *volatile buf = 0;
 	int err;
-	if (NumSenders == 0)
-		return 0;
+
+	err = pthread_mutex_lock(&SendMut);
+	assert(err == 0);
 	if (b) {
 		buf = b;
 		size = s;
 	}
-	err = pthread_mutex_lock(&SendMut);
-	assert(err == 0);
 	if (s < 0)
 		--NumSenders;
 	if (--ActSenders) {
 		//debugmsg("syncSenders(%p,%d): ActSenders = %d\n",b,s,ActSenders);
+		pthread_cleanup_push(releaseLock,&SendMut);
 		err = pthread_cond_wait(&SendCond,&SendMut);
 		assert(err == 0);
-		err = pthread_mutex_unlock(&SendMut);
-		assert(err == 0);
+		pthread_cleanup_pop(1);
 		//debugmsg("syncSenders(): continue\n");
 		return 0;
 	} else {
@@ -836,6 +870,7 @@ static inline int syncSenders(char *b, int s)
 
 static inline void terminateSender(int fd, dest_t *d, int ret)
 {
+	int err;
 	debugmsg("terminating operation on %s\n",d->arg);
 	if (-1 != fd) {
 		if (0 != fsync(fd)) {
@@ -854,6 +889,8 @@ static inline void terminateSender(int fd, dest_t *d, int ret)
 		int ret = syncSenders(0,-1);
 		debugmsg("terminateSender(%s): sendSender(0,-1) = %d\n",d->arg,ret);
 	}
+	err = sem_post(&Done);
+	assert(err == 0);
 	pthread_exit((void *) ret);
 }
 
@@ -906,7 +943,7 @@ static void *senderThread(void *arg)
 {
 	unsigned long long outsize = Blocksize;
 	dest_t *dest = (dest_t *)arg;
-	int out = dest->fd;
+	int out = dest->fd, sendout = Sendout;
 #ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 	struct stat st;
 #endif
@@ -954,10 +991,14 @@ static void *senderThread(void *arg)
 			int ret;
 			assert(size >= num);
 #ifdef HAVE_SENDFILE
-			if (Sendout) {
+			if (sendout) {
 				off_t baddr = (off_t) (SendAt+num);
 				ret = sendfile(out,SFV_FD_SELF,&baddr,rest > outsize ? outsize : rest);
 				debugmsg("sender(%s): sendfile(Out, SFV_FD_SELF, &%p, %llu) = %d\n", dest->arg, (void*)baddr, (unsigned long long) (rest > outsize ? outsize : rest), ret);
+				if ((ret == -1) && ((errno == EINVAL) || (errno == EOPNOTSUPP))) {
+					sendout = 0;
+					continue;
+				}
 			} else
 #endif
 			{
@@ -1040,7 +1081,10 @@ static int requestOutputVolume(int out, const char *outfile)
 		mode = O_WRONLY|O_TRUNC|OptSync|LARGEFILE;
 		if (strncmp(outfile,"/dev/",5))
 			mode |= Nooverwrite|O_CREAT;
-		if (-1 == (out = open(outfile,mode,0666)))
+		if (Direct)
+			mode |= DIRECT;
+		out = open(outfile,mode,0666);
+		if (-1 == out)
 			errormsg("error reopening output file: %s\n",strerror(errno));
 #ifdef __sun
 		if (-1 == directio(out,DIRECTIO_ON))
@@ -1106,15 +1150,13 @@ static void *outputThread(void *arg)
 {
 	dest_t *dest = (dest_t *) arg;
 	unsigned at = 0;
-	int fill = 0, haderror = 0, out, ret;
+	int fill = 0, haderror = 0, out, ret, sendout = Sendout, multipleSenders = NumSenders > 0;
 	const double startwrite = StartWrite, startread = StartRead;
 	unsigned long long blocksize = Blocksize;
 	long long xfer = 0;
 	struct timeval last;
 
 	/* initialize last to 0, because we don't want to wait initially */
-	ret = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,0);
-	assert(ret == 0);
 	(void) gettimeofday(&last,0);
 	assert(NumSenders >= 0);
 	if (dest->next) {
@@ -1150,8 +1192,10 @@ static void *outputThread(void *arg)
 		assert(err == 0);
 		if ((fill == 0) && (startwrite > 0)) {
 			debugmsg("outputThread: buffer empty, waiting for it to fill\n");
+			pthread_cleanup_push(releaseLock,&HighMut);
 			err = pthread_cond_wait(&PercHigh,&HighMut);
 			assert(err == 0);
+			pthread_cleanup_pop(0);
 			++EmptyCount;
 			debugmsg("outputThread: high watermark reached, continuing...\n");
 		}
@@ -1160,16 +1204,16 @@ static void *outputThread(void *arg)
 		err = sem_wait(&Buf2Dev);
 		assert(err == 0);
 		if (Terminate) {
-			(void) pthread_cancel(Reader);
 			debugmsg("outputThread: terminating upon termination request...\n");
 			if (-1 == close(dest->fd)) 
-				errormsg("error closing output %s: %s\n",dest->arg,strerror(errno));;
+				errormsg("error closing output %s: %s\n",dest->arg,strerror(errno));
 			dest->result = "canceled";
 			pthread_exit((void*)1);
 		}
 		if (Finish == at) {
 			if (0 == Rest) {
-				syncSenders((char*)0xdeadbeef,0);
+				if (multipleSenders)
+					syncSenders((char*)0xdeadbeef,0);
 				infomsg("outputThread: finished - exiting...\n");
 				pthread_exit((void*)haderror);
 			} else {
@@ -1177,7 +1221,8 @@ static void *outputThread(void *arg)
 				debugmsg("outputThread: last block has %llu bytes\n",Rest);
 			}
 		}
-		syncSenders(Buffer[at],blocksize);
+		if (multipleSenders)
+			syncSenders(Buffer[at],blocksize);
 		/* switch output volume if -D <size> has been reached */
 		if ( (OutVolsize != 0) && (Numout > 0) && (Numout % (OutVolsize/Blocksize)) == 0 ) {
 			/* Sleep to let status thread "catch up" so that the displayed total is a multiple of OutVolsize */
@@ -1197,10 +1242,14 @@ static void *outputThread(void *arg)
 				num = (int)rest;
 			} else
 #ifdef HAVE_SENDFILE
-			if (Sendout) {
-				off_t baddr = (off_t) Buffer[at] + blocksize - rest;
-				num = sendfile(out,SFV_FD_SELF,&baddr,rest > Outsize ? Outsize : rest);
+			if (sendout) {
+				off_t baddr = (off_t) (Buffer[at] + blocksize - rest);
+				num = sendfile(out,SFV_FD_SELF,&baddr,(size_t)(rest > Outsize ? Outsize : rest));
 				debugmsg("outputThread: sendfile(out, SFV_FD_SELF, &(Buffer[%d] + %llu), %llu) = %d\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, num);
+				if ((num == -1) && ((errno == EOPNOTSUPP) || (errno == EINVAL))) {
+					sendout = 0;
+					continue;
+				}
 			} else
 #endif
 			{
@@ -1241,7 +1290,8 @@ static void *outputThread(void *arg)
 		if (Pause)
 			(void) mt_usleep(Pause);
 		if (Finish == at) {
-			syncSenders((char*)0xdeadbeef,0);
+			if (multipleSenders)
+				syncSenders((char*)0xdeadbeef,0);
 			terminateOutputThread(dest);
 			return 0;	/* make lint happy */
 		}
@@ -1409,6 +1459,9 @@ static void usage(void)
 		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"
 		"-q         : quiet - do not display the status on stderr\n"
 		"-c         : write with synchronous data integrity support\n"
+#ifdef O_DIRECT
+		"--direct   : open input and output with O_DIRECT\n"
+#endif
 #if defined HAVE_LIBCRYPTO || defined HAVE_LIBMD5 || defined HAVE_LIBMHASH
 		"-H\n"
 		"--md5      : generate md5 hash of transfered data\n"
@@ -1492,7 +1545,7 @@ int main(int argc, const char **argv)
 {
 	unsigned long long totalmem = 0;
 	long mxnrsem;
-	int err, optMset = 0, optSset = 0, optBset = 0, c, fl;
+	int err, optMset = 0, optSset = 0, optBset = 0, c, fl, numstdout = 0;
 	sigset_t       signalSet;
 #ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 	struct stat st;
@@ -1574,17 +1627,34 @@ int main(int argc, const char **argv)
 				fatal("argument for number of volumes must be > 0\n");
 			debugmsg("Multivolume = %d\n",Multivolume);
 		} else if (!argcheck("-i",argv,&c,argc)) {
-			Infile = argv[c];
-			debugmsg("Infile = %s\n",Infile);
+			if (strcmp(argv[c],"-")) {
+				Infile = argv[c];
+				debugmsg("Infile = %s\n",Infile);
+			} else {
+				Infile = STDIN_FILENO;
+				debugmsg("Infile is stdin\n");
+			}
 		} else if (!argcheck("-o",argv,&c,argc)) {
-			debugmsg("output file: %s\n",argv[c]);
 			dest_t *dest = malloc(sizeof(dest_t));
-			dest->arg = argv[c];
+			if (strcmp(argv[c],"-")) {
+				debugmsg("output file: %s\n",argv[c]);
+				dest->arg = argv[c];
+				dest->name = argv[c];
+				dest->fd = -1;
+			} else {
+				if (numstdout++) 
+					fatal("cannot output multiple times to stdout");
+				debugmsg("output to stdout\n",argv[c]);
+				dest->fd = dup(STDOUT_FILENO);
+				err = dup2(STDOUT_FILENO,STDERR_FILENO);
+				assert(err != -1);
+				dest->arg = "<stdout>";
+				dest->name = "<stdout>";
+			}
 			dest->port = -1;
-			dest->name = argv[c];
 			dest->result = 0;
-			dest->next = Dest;
 			bzero(&dest->thread,sizeof(dest->thread));
+			dest->next = Dest;
 			Dest = dest;
 			if (outfile == 0)
 				outfile = argv[c];
@@ -1665,6 +1735,13 @@ int main(int argc, const char **argv)
 		} else if (!strcmp("-L",argv[c])) {
 			Memlock = 1;
 #endif
+		} else if (!strcmp("--direct",argv[c])) {
+#ifdef O_DIRECT
+			debugmsg("using O_DIRECT to open file descriptors\n");
+			Direct = 1;
+#else
+			warningmsg("--direct is unsupported on this system\n");
+#endif
 		} else if (!strcmp("--help",argv[c]) || !strcmp("-h",argv[c])) {
 			usage();
 		} else if (!strcmp("--version",argv[c]) || !strcmp("-V",argv[c])) {
@@ -1742,8 +1819,8 @@ int main(int argc, const char **argv)
 		fatal("cannot allocate more than %d blocks.\nThis is a system dependent limit, depending on the maximum semaphore value.\nPlease choose a bigger block size.\n",mxnrsem);
 	}
 
-	if (Blocksize * Numblocks > SSIZE_MAX)
-		fatal("Cannot address so much memory (%lld*%lld=%lld>%lld).\n",Blocksize,Numblocks, Blocksize*Numblocks,SSIZE_MAX);
+	if ((Blocksize * (long long)Numblocks) > (long long)SSIZE_MAX)
+		fatal("Cannot address so much memory (%lld*%d=%lld>%lld).\n",Blocksize,Numblocks,Blocksize*(long long)Numblocks,(long long)SSIZE_MAX);
 	/* create buffer */
 	Buffer = (char **) memalign(sysconf(_SC_PAGESIZE),Numblocks * sizeof(char *));
 	if (!Buffer)
@@ -1812,6 +1889,8 @@ int main(int argc, const char **argv)
 #endif
 
 	debugmsg("creating semaphores...\n");
+	if (0 != sem_init(&Done,0,0))
+		fatal("Error creating semaphore Done: %s\n",strerror(errno));
 	if (0 != sem_init(&Buf2Dev,0,0))
 		fatal("Error creating semaphore Buf2Dev: %s\n",strerror(errno));
 	if (0 != sem_init(&Dev2Buf,0,Dest ? Numblocks - 1 : Numblocks))
@@ -1819,8 +1898,18 @@ int main(int argc, const char **argv)
 
 	debugmsg("opening input...\n");
 	if (Infile) {
-		if (-1 == (In = open(Infile,O_RDONLY|LARGEFILE)))
-			fatal("could not open input file: %s\n",strerror(errno));
+		int flags = O_RDONLY | LARGEFILE;
+		if (Direct)
+			flags |= DIRECT;
+		In = open(Infile,flags);
+		if (-1 == In) {
+			if (errno == EINVAL) {
+				flags &= ~LARGEFILE;
+				In = open(Infile,flags);
+			}
+			if (-1 == In)
+				fatal("could not open input file: %s\n",strerror(errno));
+		}
 	} else if (netPortIn) {
 		openNetworkInput(client,netPortIn);
 	} else {
@@ -1837,11 +1926,21 @@ int main(int argc, const char **argv)
 		do {
 			if (d->port != -1) {
 				openNetworkOutput(d);
-			} else {
+			} else if (d->fd == -1) {
 				mode_t mode = O_WRONLY|O_TRUNC|OptSync|LARGEFILE;
+				if (Direct)
+					mode |= DIRECT;
 				if (strncmp(outfile,"/dev/",5))
 					mode |= Nooverwrite|O_CREAT;
 				d->fd = open(outfile,mode,0666);
+				if ((-1 == d->fd) && (errno == EINVAL)) {
+					mode &= ~LARGEFILE;
+					d->fd = open(outfile,mode,0666);
+				}
+				if ((-1 == d->fd) && (errno == EINVAL)) {
+					mode &= ~O_TRUNC;
+					d->fd = open(outfile,mode,0666);
+				}
 				if (-1 == d->fd) {
 					d->result = strerror(errno);
 					errormsg("unable to open output %s: %s\n",d->arg,strerror(errno));
@@ -1865,7 +1964,9 @@ int main(int argc, const char **argv)
 		}
 	} else {
 		Dest = malloc(sizeof(dest_t));
-		Dest->fd = STDOUT_FILENO;
+		Dest->fd = dup(STDOUT_FILENO);
+		err = dup2(STDOUT_FILENO,STDERR_FILENO);
+		assert(err != -1);
 		Dest->name = "<stdout>";
 		Dest->arg = "<stdout>";
 		Dest->port = -1;
@@ -1952,13 +2053,17 @@ int main(int argc, const char **argv)
 	err = pthread_create(&Reader,0,&inputThread,0);
 	assert(0 == err);
 	(void) pthread_sigmask(SIG_UNBLOCK, &signalSet, NULL);
-	if (Status)
+	if (Status) {
 		statusThread();
-	else {
+	} else {
 		struct timeval now;
 		double diff;
 		int numthreads = 0;
 		dest_t *d = Dest;
+		err = sem_wait(&Done);
+		assert(err == 0);
+		if (Terminate)
+			cancelAll();
 		(void) pthread_join(Reader,0);
 		do {
 			dest_t *n = d->next;

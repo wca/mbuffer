@@ -35,7 +35,8 @@ distclean: clean
 install: $(TARGET)
 	-$(INSTALL) -d $(DESTDIR)$(bindir)
 	$(INSTALL) $(TARGET) $(DESTDIR)$(bindir)
-	$(INSTALL) mbuffer.1 $(mandir)
+	-$(INSTALL) -d $(DESTDIR)$(mandir)
+	$(INSTALL) mbuffer.1 $(DESTDIR)$(mandir)
 
 lint:
 	lint $(CFLAGS) mbuffer.c

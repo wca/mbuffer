@@ -13,36 +13,42 @@ than the standard buffer.
 .LP 
 .TP 
 \fB\-i\fR <\fIfilename\fP>
-use \fIfilename\fP as input instead of the standard input (needs to be
-given for multi volume support)
+Use \fIfilename\fP as input instead of the standard input (needs to be
+given for multi volume support). If \fIfilename\fP is -, input is read
+from standard input.
 .TP 
 \fB\-I\fR <\fIport\fP>
-use network port \fIport\fP as input instead of the standard input. If
+Use network port \fIport\fP as input instead of the standard input. If
 given a hostname and a port in the form hostname:port the first interface 
 with the IP of hostname will be used.
 .TP 
 \fB\-o\fR <\fIfilename\fP>
-use \fIfilename\fP as output instead of the standard output (needs to be
-given for multi volume support, will enable use of sendfile if available)
+Use \fIfilename\fP as output instead of the standard output (needs to be
+given for multi volume support, will enable use of sendfile if
+available). If \fIfilename\fP is -, output is written to standard
+output. The option -o can be passed multiple times to specify multiple
+outputs.
 .TP 
 \fB\-O\fR <\fIhostname:port\fP>
-write output to \fIhostname:port\fP instead of the standard output (will
-enable use of sendfile if available)
+Write output to \fIhostname:port\fP instead of the standard output (will
+enable use of sendfile if available). This option can be used multple
+times to send data to multiple machines.
 .TP 
 \fB\-b\fR <\fInum\fP>
-use \fInum\fP blocks for buffer (default 256)
+Use \fInum\fP blocks for buffer (default 256).
 .TP 
 \fB\-s\fR <\fIsize\fP>
-use blocks of \fIsize\fP bytes for buffer (default 10240)
+Use blocks of \fIsize\fP bytes for buffer (default pagesize of system).
 .TP 
 \fB\-m\fR <\fIsize\fP>
-use a total of \fIsize\fP bytes for buffer (default 2MB) - size can be
+Use a total of \fIsize\fP bytes for buffer (default 2MB) - size can be
 set with a trailing character (b and B for Byte, k for kByte, M for
 MByte, G for Gigabyte, and with % for a percentage of total physical 
-memory)
+memory).
 .TP 
-\fB\-L\f
-lock buffer in memory - this option is not available for file-based buffers and requires mbuffer to be setuid root (use with care)
+\fB\-L\fR
+Lock buffer in memory - this option is not available for file-based
+buffers and requires mbuffer to be setuid root (use with care).
 .TP 
 \fB\-n\fR <\fInum\fP>
 \fInum\fP volumes in input device (requires use of option \-i for input device specification) [currently multi volume support is EXPERIMENTAL]
@@ -109,6 +115,15 @@ set verbose level to \fInum\fP. Valid values are 0..5 (0 = none, 1 = errors, 2 =
 .TP 
 \fB\-q\fR
 quiet \- do not display the status on the standard error output
+\fB\-\-direct\fR
+Use O_DIRECT to open file descriptors. This option is not available on
+all systems. It tells the OS to bypass the page cache to improve
+performance when reading and writing. On Solaris this is an automagic
+option that is enabled if it is supported for the relevant file. Be
+aware that this option might lead to read/write failures, if the buffer
+isn't properly aligned for direct I/O. Additionally, open might fail
+with EINVAL (i.e. invalid argument) if the named file does not support
+O_DIRECT.
 .TP 
 \fB\-h, \-\-help\fR
 Output help information and exit.

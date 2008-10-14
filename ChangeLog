@@ -1,3 +1,14 @@
+20081014:
+- redirect autoloader stdout to mbuffer's stderr
+- added support for O_DIRECT (use option --direct)
+- options -o and -i should recognize "-" as stdin/stdout
+- direct use Solaris' native semaphore implementation
+- fixed cancellation issues
+- manpath needs to be created
+- sendfile should fallback to write if unsupported
+- fixed maximum addressable memory message
+- docu update
+
 20080910:
 - new feature: support for multiple ouptuts
 - new LICENSE: GPLv3
