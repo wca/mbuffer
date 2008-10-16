@@ -1,3 +1,8 @@
+20081015:
+- FIX REGRESSION: stdout may be corrupted by mbuffer
+  (This regression was the result of a patch to redirect
+   stdout of autoloader commands)
+
 20081014:
 - redirect autoloader stdout to mbuffer's stderr
 - added support for O_DIRECT (use option --direct)

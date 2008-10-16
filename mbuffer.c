@@ -1646,7 +1646,7 @@ int main(int argc, const char **argv)
 					fatal("cannot output multiple times to stdout");
 				debugmsg("output to stdout\n",argv[c]);
 				dest->fd = dup(STDOUT_FILENO);
-				err = dup2(STDOUT_FILENO,STDERR_FILENO);
+				err = dup2(STDERR_FILENO,STDOUT_FILENO);
 				assert(err != -1);
 				dest->arg = "<stdout>";
 				dest->name = "<stdout>";
@@ -1965,7 +1965,7 @@ int main(int argc, const char **argv)
 	} else {
 		Dest = malloc(sizeof(dest_t));
 		Dest->fd = dup(STDOUT_FILENO);
-		err = dup2(STDOUT_FILENO,STDERR_FILENO);
+		err = dup2(STDERR_FILENO,STDOUT_FILENO);
 		assert(err != -1);
 		Dest->name = "<stdout>";
 		Dest->arg = "<stdout>";
