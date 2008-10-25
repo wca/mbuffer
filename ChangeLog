@@ -1,3 +1,10 @@
+20081023:
+- mbuffer should not abort on SIGTERM
+- mbuffer should not segv on invalid arguments for options -m, -s
+- transfer statistics should wait for the first block to be received
+- minor code path optimization
+- option -n should accept -n1
+
 20081015:
 - FIX REGRESSION: stdout may be corrupted by mbuffer
   (This regression was the result of a patch to redirect
