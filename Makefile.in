@@ -4,6 +4,7 @@ CFLAGS		= @CFLAGS@ $(DEFS)
 LDFLAGS		= @LDFLAGS@
 LIBS		= @LIBS@
 EXE		= @EXEEXT@
+SHELL		= /bin/ksh
 
 prefix		= @prefix@
 exec_prefix     = @exec_prefix@
@@ -40,3 +41,39 @@ install: $(TARGET)
 
 lint:
 	lint $(CFLAGS) mbuffer.c
+
+check: test0 test1 test2 testcleanup
+
+testcleanup:
+	rm -f test0 test1 test2
+
+test.tar:
+	tar cf test.tar /opt/csw/gcc4
+
+testprepare: test.tar
+	openssl md5 < test.tar > testprepare
+
+test0: testprepare
+	./mbuffer -i test.tar -p10 | ./mbuffer -q -P 90 | openssl md5 > test0.md5
+	diff test0.md5 testprepare
+	touch test0
+
+test1: testprepare
+	./mbuffer -i test.tar -f -o t1.tar -o /dev/null -H
+	openssl md5 < t1.tar > test1.md5
+	rm -f t1.tar
+	diff test1.md5 testprepare
+	touch test1
+
+test2: testprepare
+	./mbuffer -q -I :8000 | openssl md5 > test2.md5 &
+	sleep 1
+	-rm -f t2.tar
+	./mbuffer -i test.tar -o /dev/null -O localhost:8000 -o t2.tar -H
+	wait
+	diff test2.md5 testprepare
+	openssl md5 < t2.tar > test2.md5 
+	rm -f t2.tar
+	diff test2.md5 testprepare
+	touch test2
+

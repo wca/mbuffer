@@ -1964,7 +1964,7 @@ test -n "$target_alias" &&
 
 
 PACKAGE=mbuffer
-VERSION=20081023
+VERSION=20081113
 
 if test "${LD_LIBRARY_PATH}" != "" ; then
 	echo ""
@@ -5098,9 +5098,6 @@ cat >>confdefs.h <<\_ACEOF
 #define HAVE_SENDFILE 1
 _ACEOF
 
-else
-  { $as_echo "$as_me:$LINENO: WARNING: could not find sendfile support" >&5
-$as_echo "$as_me: WARNING: could not find sendfile support" >&2;}
 fi
 
 if test "${ac_cv_header_sys_sendfile_h+set}" = set; then

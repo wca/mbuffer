@@ -5,7 +5,7 @@ AC_CANONICAL_SYSTEM
 AC_EXEEXT
 
 PACKAGE=mbuffer
-VERSION=20081023
+VERSION=20081113
 
 if test "${LD_LIBRARY_PATH}" != "" ; then
 	echo ""
@@ -52,7 +52,7 @@ AC_SEARCH_LIBS(socket,socket,,AC_MSG_ERROR(could not find the library containing
 AC_SEARCH_LIBS(gethostbyname,nsl,,AC_MSG_ERROR(could not find the library containing name convertion functions!))
 #AC_SEARCH_LIBS(hstrerror,resolv,,AC_MSG_ERROR(could not find the library containing hstrerror))
 AC_CHECK_LIB(resolv,hstrerror)
-AC_SEARCH_LIBS(sendfile,sendfile,AC_DEFINE(HAVE_SENDFILE,1,libsendfile is available),AC_MSG_WARN(could not find sendfile support))
+AC_SEARCH_LIBS(sendfile,sendfile,AC_DEFINE(HAVE_SENDFILE,1,libsendfile is available),)
 AC_CHECK_HEADER(sys/sendfile.h,AC_DEFINE(HAVE_SENDFILE_H,1,sendfile in sendfile.h),)
 
 

@@ -1,3 +1,14 @@
+20081113:
+- tune send and receive buffer of TCP stack to match block size
+- added target check to Makefile
+- fix: don't mix up file during open
+- code cleanup/unification for MD5
+- sendfile should also be used for writing to files
+- sync cleanup on output thread instead of input thread
+- fix: access to dest_t after free()
+- unified summary and join between verbose and silent mode
+- minor code cleanups
+
 20081023:
 - mbuffer should not abort on SIGTERM
 - mbuffer should not segv on invalid arguments for options -m, -s
