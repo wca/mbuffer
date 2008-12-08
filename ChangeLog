@@ -1,3 +1,9 @@
+20081207:
+- fixed some typos in man page
+- TCP buffer tuning could be a little bit more intelligent
+- fixed formating of some info messages
+- tuneable TCP buffer with option --tcpbuffer
+
 20081113:
 - tune send and receive buffer of TCP stack to match block size
 - added target check to Makefile

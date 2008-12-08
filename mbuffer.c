@@ -126,7 +126,7 @@ static long
 	Verbose = 3, In = 0, Tmp = -1, Pause = 0, Memmap = 0,
 	Status = 1, Nooverwrite = O_EXCL, Outblocksize = 0,
 	Autoloader = 0, Autoload_time = 0, OptSync = 0,
-	ErrorOccured = 0;
+	ErrorOccured = 0, TCPBufSize = 1 << 20;
 static unsigned long
 	Outsize = 10240;
 static volatile int
@@ -877,7 +877,8 @@ static void openNetworkOutput(dest_t *dest)
 {
 	struct sockaddr_in saddr;
 	struct hostent *h = 0;
-	int out, rcvsize = Blocksize << 1, err, bsize = sizeof(int);
+	long sndsize;
+	int out, err, bsize = sizeof(sndsize);
 
 	debugmsg("creating socket for output to %s:%d...\n",dest->name,dest->port);
 	out = socket(AF_INET, SOCK_STREAM, 6);
@@ -885,17 +886,22 @@ static void openNetworkOutput(dest_t *dest)
 		errormsg("could not create socket for network output: %s\n",strerror(errno));
 		return;
 	}
-	if (-1 == (err = setsockopt(out,SOL_SOCKET,SO_SNDBUF,(void *)&rcvsize,sizeof(int)))) {
-		if (errno == ENOMEM) {
-			rcvsize >>= 1;
-			err = setsockopt(out,SOL_SOCKET,SO_SNDBUF,&rcvsize,sizeof(int));
-		}
-		if (err == -1)
+	err = getsockopt(out,SOL_SOCKET,SO_SNDBUF,&sndsize,&bsize);
+	assert((err == 0) && (bsize == sizeof(sndsize)));
+	if (sndsize < TCPBufSize) {
+		sndsize = TCPBufSize;
+		do {
+			err = setsockopt(out,SOL_SOCKET,SO_SNDBUF,(void *)&sndsize,sizeof(int));
+			sndsize >>= 1;
+		} while ((-1 == err) && (errno == ENOMEM));
+		if (err == -1) {
 			warningmsg("unable to set socket receive buffer size: %s\n",strerror(errno));
+		}
 	}
-	err = getsockopt(out,SOL_SOCKET,SO_SNDBUF,&rcvsize,&bsize);
+	bsize = sizeof(sndsize);
+	err = getsockopt(out,SOL_SOCKET,SO_SNDBUF,&sndsize,&bsize);
 	assert(err != -1);
-	infomsg("set TCP send buffer size to %d\n",rcvsize);
+	infomsg("set TCP send buffer size to %d\n",sndsize);
 	bzero((void *) &saddr, sizeof(saddr));
 	saddr.sin_port = htons(dest->port);
 	infomsg("resolving host %s...\n",dest->name);
@@ -1219,7 +1225,7 @@ static void *outputThread(void *arg)
 				pthread_exit((void*)haderror);
 			} else {
 				blocksize = rest = Rest;
-				debugmsg("outputThread: last block has %llu bytes\n",Rest);
+				debugmsg("outputThread: last block has %llu bytes\n",(unsigned long long)Rest);
 			}
 		}
 		if (multipleSenders)
@@ -1331,7 +1337,8 @@ static void openNetworkInput(const char *host, unsigned short port)
 	socklen_t clen = sizeof(caddr);
 	struct hostent *h = 0, *r = 0;
 	const int reuse_addr = 1;
-	int sock, rcvsize = Blocksize << 1, bsize = sizeof(int), err;
+	long  rcvsize;
+	int sock, bsize = sizeof(rcvsize), err;
 
 	debugmsg("openNetworkInput(\"%s\",%hu)\n",host,port);
 	infomsg("creating socket for network input...\n");
@@ -1340,14 +1347,19 @@ static void openNetworkInput(const char *host, unsigned short port)
 		fatal("could not create socket for network input: %s\n",strerror(errno));
 	if (-1 == setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr)))
 		warningmsg("cannot set socket to reuse address: %s\n",strerror(errno));
-	if (-1 == (err = setsockopt(sock,SOL_SOCKET,SO_RCVBUF,&rcvsize,sizeof(int)))) {
-		if (errno == ENOMEM) {
+	err = getsockopt(sock,SOL_SOCKET,SO_RCVBUF,&rcvsize,&bsize);
+	assert((err == 0) && (bsize == sizeof(rcvsize)));
+	if (rcvsize < TCPBufSize) {
+		rcvsize = TCPBufSize;
+		do {
+			err = setsockopt(sock,SOL_SOCKET,SO_RCVBUF,(void *)&rcvsize,sizeof(int));
 			rcvsize >>= 1;
-			err = setsockopt(sock,SOL_SOCKET,SO_RCVBUF,&rcvsize,sizeof(int));
-		}
-		if (err == -1)
+		} while ((-1 == err) && (errno == ENOMEM));
+		if (err == -1) {
 			warningmsg("unable to set socket receive buffer size: %s\n",strerror(errno));
+		}
 	}
+	bsize = sizeof(rcvsize);
 	err = getsockopt(sock,SOL_SOCKET,SO_RCVBUF,&rcvsize,&bsize);
 	assert(err != -1);
 	infomsg("set TCP receive buffer size to %d\n",rcvsize);
@@ -1635,6 +1647,9 @@ int main(int argc, const char **argv)
 			Numblocks = (atoi(argv[c])) ? ((unsigned long long) atoll(argv[c])) : Numblocks;
 			optBset = 1;
 			debugmsg("Numblocks = %llu\n",Numblocks);
+		} else if (!strcmp("--tcpbuffer",argv[c])) {
+			TCPBufSize = calcint(argv,++c,TCPBufSize);
+			debugmsg("TCPBufSize = %lu\n",TCPBufSize);
 		} else if (!argcheck("-d",argv,&c,argc)) {
 #ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 			SetOutsize = 1;
@@ -1809,14 +1824,14 @@ int main(int argc, const char **argv)
 		if (totalmem <= Blocksize)
 			fatal("total memory must be larger than block size\n");
 		Numblocks = totalmem / Blocksize;
-		infomsg("Numblocks = %llu, Blocksize = %llu, totalmem = %llu\n",Numblocks,Blocksize,totalmem);
+		infomsg("Numblocks = %llu, Blocksize = %llu, totalmem = %llu\n",(unsigned long long)Numblocks,(unsigned long long)Blocksize,(unsigned long long)totalmem);
 	} else if (optBset&!optSset&optMset) {
 		if (Blocksize == 0)
 			fatal("blocksize must be greater than 0\n");
 		if (totalmem <= Blocksize)
 			fatal("total memory must be larger than block size\n");
 		Blocksize = totalmem / Numblocks;
-		infomsg("blocksize = %llu\n",Blocksize);
+		infomsg("blocksize = %llu\n",(unsigned long long)Blocksize);
 	}
 	if ((StartRead < 1) && (StartWrite > 0))
 		fatal("setting both low watermark and high watermark doesn't make any sense...\n");
@@ -1863,7 +1878,7 @@ int main(int argc, const char **argv)
 	if (!Buffer)
 		fatal("Could not allocate enough memory (%d requested): %s\n",Numblocks * sizeof(char *),strerror(errno));
 	if (Memmap) {
-		infomsg("mapping temporary file to memory with %llu blocks with %llu byte (%llu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
+		infomsg("mapping temporary file to memory with %llu blocks with %llu byte (%llu kB total)...\n",(unsigned long long) Numblocks,(unsigned long long) Blocksize,(unsigned long long) ((Numblocks*Blocksize) >> 10));
 		if (!Tmpfile) {
 			char tmplname[] = "mbuffer-XXXXXX";
 			char *tmpdir = getenv("TMPDIR") ? getenv("TMPDIR") : "/var/tmp";
@@ -1897,10 +1912,10 @@ int main(int argc, const char **argv)
 			fatal("could not map buffer-file to memory: %s\n",strerror(errno));
 		debugmsg("temporary file mapped to address %p\n",Buffer[0]);
 	} else {
-		infomsg("allocating memory for %d blocks with %llu byte (%llu kB total)...\n",Numblocks,Blocksize,(Numblocks*Blocksize) >> 10);
+		infomsg("allocating memory for %d blocks with %llu byte (%llu kB total)...\n",Numblocks,(unsigned long long) Blocksize,(unsigned long long) ((Numblocks*Blocksize) >> 10));
 		Buffer[0] = (char *) valloc(Blocksize * Numblocks);
 		if (Buffer[0] == 0)
-			fatal("Could not allocate enough memory (%lld requested): %s\n",strerror(errno));
+			fatal("Could not allocate enough memory (%lld requested): %s\n",(unsigned long long)Blocksize * Numblocks,strerror(errno));
 	}
 	for (c = 1; c < Numblocks; c++) {
 		Buffer[c] = Buffer[0] + Blocksize * c;

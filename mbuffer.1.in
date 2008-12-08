@@ -7,7 +7,7 @@ mbuffer [\fIoptions\fP]
 .SH "DESCRIPTION"
 .LP 
 mbuffer buffers i/o operations and displays the throughput rate. It is
-multithreaded, supports network connections, and offers more options
+multi-threaded, supports network connections, and offers more options
 than the standard buffer.
 .SH "OPTIONS"
 .LP 
@@ -31,7 +31,7 @@ outputs.
 .TP 
 \fB\-O\fR <\fIhostname:port\fP>
 Write output to \fIhostname:port\fP instead of the standard output (will
-enable use of sendfile if available). This option can be used multple
+enable use of sendfile if available). This option can be used multiple
 times to send data to multiple machines.
 .TP 
 \fB\-b\fR <\fInum\fP>
@@ -48,19 +48,20 @@ memory).
 .TP 
 \fB\-L\fR
 Lock buffer in memory - this option is not available for file-based
-buffers and requires mbuffer to be setuid root (use with care).
+buffers and requires mbuffer to be set-UID root (use with care).
 .TP 
 \fB\-n\fR <\fInum\fP>
-\fInum\fP volumes in input device (requires use of option \-i for input device specification) [currently multi volume support is EXPERIMENTAL]
+\fInum\fP volumes in input device (requires use of option \-i for input
+device specification) [currently multi volume support is EXPERIMENTAL]
 .TP 
 \fB\-t\fR
-use a memory mapped temporaray file as buffer (use with huge buffers)
+use a memory mapped temporary file as buffer (use with huge buffers)
 .TP 
 \fB\-T\fR <\fIfile\fP>
 as \-t but use \fIfile\fP instead
 .TP 
 \fB\-d\fR
-use blocksize of device for output (needed for some devices, slows output down)
+use block-size of device for output (needed for some devices, slows output down)
 .TP 
 \fB\-D\fR <\fIsize\fP>
 assume an output volume of \fIsize\fP bytes (default infinite) after which
@@ -73,17 +74,17 @@ for Byte, k for kByte, M for MByte, or G for Gigabyte)
 start writing after the buffer has been filled to \fInum\fP% (default 0 \- start at once)
 .TP 
 \fB\-p\fR <\fInum\fP>
-start reading after the buffer has dropped below fillratio of \fInum\fP% (default 100 \- start at once)
+start reading after the buffer has dropped below fill-ratio of \fInum\fP% (default 100 \- start at once)
 .TP 
 \fB\-l\fR <\fIfile\fP>
 log messages to \fIfile\fP instead of standard error output
 .TP 
 \fB\-u\fR <\fInum\fP>
-pause \fInum\fP microseconds after each write \- might increase performance on some drives with very low performace (< 1 MB/sec)
+pause \fInum\fP microseconds after each write \- might increase performance on some drives with very low performance (< 1 MB/sec)
 .TP 
 \fB\-r\fR <\fIrate\fP>
 Set the maximum read rate to <\fIrate\fP>. <\fIrate\fP> can be given in
-either Bytes, kBytes, MBytes, or GBytes per second. To do so, use an apropriate
+either Bytes, kBytes, MBytes, or GBytes per second. To do so, use an appropriate
 suffix (i.e. k,M,G). This options is useful if you have a tape that is
 capable to transfer data faster than the host can handle it. In this
 case you can use this option to limit the transfer rate and keep the
@@ -118,7 +119,7 @@ quiet \- do not display the status on the standard error output
 \fB\-\-direct\fR
 Use O_DIRECT to open file descriptors. This option is not available on
 all systems. It tells the OS to bypass the page cache to improve
-performance when reading and writing. On Solaris this is an automagic
+performance when reading and writing. On Solaris this is an auto-magic
 option that is enabled if it is supported for the relevant file. Be
 aware that this option might lead to read/write failures, if the buffer
 isn't properly aligned for direct I/O. Additionally, open might fail
@@ -129,7 +130,7 @@ O_DIRECT.
 Output help information and exit.
 .TP 
 \fB\-H, \-\-md5\fR
-Generate md5 hash of transfered data.
+Generate md5 hash of transferred data.
 .TP 
 \fB\-V, \-\-version\fR
 Output version information and exit.
@@ -189,7 +190,7 @@ exit code.
 Thomas Maier\-Komor <thomas@maier\-komor.de>
 .SH "DONATIONS"
 .LP
-If you like this software, and use it for production porposes in your
+If you like this software, and use it for production purposes in your
 company, please consider making a donation to support this work. 
 You can donate directly via PayPal to the author's e-mail address
 (thomas@maier\-komor.de).
