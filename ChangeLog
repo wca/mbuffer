@@ -1,3 +1,10 @@
+20090106:
+- BSD compatibility update
+- replace use of deprecated atoi with strtol
+- better argument checking for numeric options
+- enhanced semaphore limits checking
+- add phony targets
+
 20081207:
 - fixed some typos in man page
 - TCP buffer tuning could be a little bit more intelligent

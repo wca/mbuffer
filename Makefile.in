@@ -19,6 +19,8 @@ TARGET		= mbuffer$(EXE)
 SOURCES		= mbuffer.c
 OBJECTS		= $(SOURCES:.c=.o)
 
+.PHONY: clean all distclean install check testcleanup
+
 all: $(TARGET)
 
 $(OBJECTS): config.h Makefile

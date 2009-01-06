@@ -32,7 +32,6 @@ typedef int caddr_t;
 #include <fcntl.h>
 #include <libgen.h>
 #include <limits.h>
-#include <malloc.h>
 #include <math.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -48,6 +47,10 @@ typedef int caddr_t;
 #include <termios.h>
 #include <unistd.h>
 
+#ifdef __FreeBSD__
+#include <sys/sysctl.h>
+#endif
+
 #ifdef HAVE_SENDFILE
 #ifdef HAVE_SENDFILE_H
 #include <sys/sendfile.h>
@@ -60,6 +63,10 @@ typedef int caddr_t;
 	#endif
 	#undef HAVE_SENDFILE
 	#endif
+#endif
+
+#ifndef EBADRQC
+#define EBADRQC EINVAL
 #endif
 
 #ifdef HAVE_LIBMHASH
@@ -1415,6 +1422,7 @@ static void openNetworkInput(const char *host, unsigned short port)
 static void getNetVars(const char **argv, int *c, const char **host, unsigned short *port)
 {
 	char *tmphost;
+	long p;
 	
 	tmphost = malloc(strlen(argv[*c] + 1));
 	if (0 == tmphost)
@@ -1427,10 +1435,16 @@ static void getNetVars(const char **argv, int *c, const char **host, unsigned sh
 	if (1 == sscanf(argv[*c],":%hu",port)) {
 		return;
 	}
-	if (0 != (*port = atoi(argv[*c])))
+	p = strtol(argv[*c],0,0);
+	if (0 != p) {
+		*port = (unsigned short) p;
 		return;
+	}
 	*host = argv[*c];
-	*port = atoi(argv[*c]);
+	if ((p == 0) && (errno == EINVAL))
+		errormsg("invalid port argument: %s\n",argv[*c]);
+	else
+		*port = (unsigned short) p;
 	if (*port)
 		(*c)++;
 }
@@ -1465,7 +1479,7 @@ static void usage(void)
 		"Options:\n"
 		"-b <num>   : use <num> blocks for buffer (default: %d)\n"
 		"-s <size>  : use block of <size> bytes for buffer (default: %llu)\n"
-#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__)
+#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__) || defined(__FreeBSD__)
 		"-m <size>  : memory <size> of buffer in b,k,M,G,%% (default: 2%% = %llu%c)\n"
 #else
 		"-m <size>  : memory <size> of buffer in b,k,M,G,%% (default: %llu%c)\n"
@@ -1617,6 +1631,12 @@ int main(int argc, const char **argv)
 	assert(nump > 0);
 	Blocksize = pgsz;
 	Numblocks = nump/50;
+#elif defined(__FreeBSD__)
+	size_t nump_size = sizeof(nump_size);
+	unsigned long pgsz,nump;
+	sysctlbyname("hw.availpages", &nump, &nump_size, NULL, 0);
+	pgsz = sysconf(_SC_PAGESIZE);
+	assert(pgsz > 0);
 #endif
 	progname = basename(argv0);
 	PrefixLen = strlen(progname) + 2;
@@ -1636,16 +1656,21 @@ int main(int argc, const char **argv)
 			totalmem = calcint(argv,c,totalmem);
 			optMset = 1;
 			if (totalmem < 100) {
-#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__)
+#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__) || defined(__FreeBSD__)
 				totalmem = ((unsigned long long) nump * pgsz * totalmem) / 100 ;
 #else
 				fatal("Unable to determine page size or amount of available memory - please specify an absolute amount of memory.\n");
 #endif
 			}
-			debugmsg("totalmem = %llu\n",totalmem);
+			debugmsg("totalmem = %lluk\n",totalmem>>10);
 		} else if (!argcheck("-b",argv,&c,argc)) {
-			Numblocks = (atoi(argv[c])) ? ((unsigned long long) atoll(argv[c])) : Numblocks;
-			optBset = 1;
+			long nb = strtol(argv[c],0,0);
+			if ((nb == 0) && (errno == EINVAL)) {
+				errormsg("invalid argument to option -b: \"%s\"\n",argv[c]);
+			} else {
+				Numblocks = nb;
+				optBset = 1;
+			}
 			debugmsg("Numblocks = %llu\n",Numblocks);
 		} else if (!strcmp("--tcpbuffer",argv[c])) {
 			TCPBufSize = calcint(argv,++c,TCPBufSize);
@@ -1658,16 +1683,26 @@ int main(int argc, const char **argv)
 			fatal("cannot determine blocksize of device (unsupported by OS)\n");
 #endif
 		} else if (!argcheck("-v",argv,&c,argc)) {
+			int verb;
 			if (c == argc)
-				fatal("missing argument for option -v");
-			Verbose = (atoi(argv[c])) ? (atoi(argv[c])) : Verbose;
+				fatal("missing argument for option -v\n");
+			verb = strtol(argv[c],0,0);
+			if ((verb == 0) && (errno == EINVAL))
+				errormsg("invalid argument to option -v: \"%s\"\n",argv[c]);
+			else
+				Verbose = verb;
 			debugmsg("Verbose = %d\n",Verbose);
 #if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__)
 			debugmsg("total # of phys pages: %li (pagesize %li)\n",nump,pgsz);
 #endif
 			debugmsg("default buffer set to %d blocks of %lld bytes\n",Numblocks,Blocksize);
 		} else if (!argcheck("-u",argv,&c,argc)) {
-			Pause = (atoi(argv[c])) ? (atoi(argv[c])) * 1000 : Pause;
+
+			long p = strtol(argv[c],0,0);
+			if ((p == 0) && (errno == EINVAL))
+				errormsg("invalid argument to option -u: \"%s\"\n",argv[c]);
+			else
+				Pause = p;
 			debugmsg("Pause = %d\n",Pause);
 		} else if (!argcheck("-r",argv,&c,argc)) {
 			MaxReadSpeed = calcint(argv,c,0);
@@ -1676,7 +1711,11 @@ int main(int argc, const char **argv)
 			MaxWriteSpeed = calcint(argv,c,0);
 			debugmsg("MaxWriteSpeed = %lld\n",MaxWriteSpeed);
 		} else if (!argcheck("-n",argv,&c,argc)) {
-			Multivolume = atoi(argv[c]) - 1;
+			long mv = strtol(argv[c],0,0) - 1;
+			if ((mv == 0) && (errno == EINVAL)) 
+				errormsg("invalid argument to option -n: \"%s\"\n",argv[c]);
+			else
+				Multivolume = mv;
 			if (Multivolume < 0)
 				fatal("argument for number of volumes must be > 0\n");
 			debugmsg("Multivolume = %d\n",Multivolume);
@@ -1760,10 +1799,15 @@ int main(int argc, const char **argv)
 			Status = 0;
 		} else if (!strcmp("-c",argv[c])) {
 			debugmsg("enabling full synchronous I/O\n");
-			OptSync = O_DSYNC;
+			OptSync = O_SYNC;
 		} else if (!argcheck("-a",argv,&c,argc)) {
-			Autoloader = 1;
-			Autoload_time = atoi(argv[c]);
+			long at = strtol(argv[c],0,0) - 1;
+			if ((at == 0) && (errno == EINVAL)) 
+				errormsg("invalid argument to option -a: \"%s\"\n",argv[c]);
+			else {
+				Autoloader = 1;
+				Autoload_time = at;
+			}
 			debugmsg("Autoloader time = %d\n",Autoload_time);
 		} else if (!argcheck("-A",argv,&c,argc)) {
 			Autoloader = 1;
@@ -1864,17 +1908,31 @@ int main(int argc, const char **argv)
 	/* SPW END */
 
 	/* check that we stay within system limits */
+#ifdef __FreeBSD__
+	{
+		size_t semvmx_size = sizeof(mxnrsem);
+		if (sysctlbyname("kern.ipc.semvmx", &mxnrsem, &semvmx_size, 0, 0) == -1)
+			mxnrsem = -1;
+	}
+#else
 	mxnrsem = sysconf(_SC_SEM_VALUE_MAX);
+#endif
 	if (-1 == mxnrsem) {
+#ifdef SEM_MAX_VALUE
+		mxnrsem = SEM_MAX_VALUE;
+#else
+		mxnrsem = LONG_MAX;
 		warningmsg("unable to determine maximum value of semaphores\n");
-	} else if (Numblocks > (unsigned long long) mxnrsem) {
+#endif
+	}
+	if (Numblocks > mxnrsem) {
 		fatal("cannot allocate more than %d blocks.\nThis is a system dependent limit, depending on the maximum semaphore value.\nPlease choose a bigger block size.\n",mxnrsem);
 	}
 
 	if ((Blocksize * (long long)Numblocks) > (long long)SSIZE_MAX)
 		fatal("Cannot address so much memory (%lld*%d=%lld>%lld).\n",Blocksize,Numblocks,Blocksize*(long long)Numblocks,(long long)SSIZE_MAX);
 	/* create buffer */
-	Buffer = (char **) memalign(sysconf(_SC_PAGESIZE),Numblocks * sizeof(char *));
+	Buffer = (char **) valloc(Numblocks * sizeof(char *));
 	if (!Buffer)
 		fatal("Could not allocate enough memory (%d requested): %s\n",Numblocks * sizeof(char *),strerror(errno));
 	if (Memmap) {
