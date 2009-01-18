@@ -884,8 +884,7 @@ static void openNetworkOutput(dest_t *dest)
 {
 	struct sockaddr_in saddr;
 	struct hostent *h = 0;
-	long sndsize;
-	int out, err, bsize = sizeof(sndsize);
+	int sndsize, out, err, bsize = sizeof(sndsize);
 
 	debugmsg("creating socket for output to %s:%d...\n",dest->name,dest->port);
 	out = socket(AF_INET, SOCK_STREAM, 6);
@@ -1339,13 +1338,11 @@ static void *outputThread(void *arg)
 
 static void openNetworkInput(const char *host, unsigned short port)
 {
-	struct sockaddr_in saddr;
-	struct sockaddr_in caddr;
+	struct sockaddr_in saddr, caddr;
 	socklen_t clen = sizeof(caddr);
 	struct hostent *h = 0, *r = 0;
 	const int reuse_addr = 1;
-	long  rcvsize;
-	int sock, bsize = sizeof(rcvsize), err;
+	int rcvsize, sock, bsize = sizeof(rcvsize), err;
 
 	debugmsg("openNetworkInput(\"%s\",%hu)\n",host,port);
 	infomsg("creating socket for network input...\n");

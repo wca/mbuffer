@@ -1,3 +1,6 @@
+20090113:
+- fix for assertion failure of 64bit binaries in network code
+
 20090106:
 - BSD compatibility update
 - replace use of deprecated atoi with strtol
