@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2000-2008, Thomas Maier-Komor
+ *  Copyright (C) 2000-2009, Thomas Maier-Komor
  *
  *  This is the source code of mbuffer.
  *
@@ -156,7 +156,7 @@ static const char
 static size_t
 	PrefixLen = 0;
 static int
-	Multivolume = 0, Memlock = 0, 
+	Multivolume = 0, Memlock = 0, TermQ[2],
 #if defined HAVE_MD5
 	Hash = 0,
 #endif
@@ -171,7 +171,7 @@ static int
 #define sem_getvalue(a,b) ((*(b) = (a)->count), 0)
 #endif
 
-static sem_t Dev2Buf, Buf2Dev, Done;
+static sem_t Dev2Buf, Buf2Dev;
 static pthread_cond_t
 	PercLow = PTHREAD_COND_INITIALIZER,	/* low watermark */
 	PercHigh = PTHREAD_COND_INITIALIZER,	/* high watermark */
@@ -386,37 +386,10 @@ static void summary(unsigned long long numb, int numthreads)
 	struct timeval now;
 	
 	(void) gettimeofday(&now,0);
-	secs = now.tv_sec - Starttime.tv_sec + (double) now.tv_usec / 1000000 - (double) Starttime.tv_usec / 1000000;
-	assert(secs > 0);
-	av = (double)(numb >>= 10)/secs*numthreads;
-	h = (int) secs/3600;
-	m = (int) (secs - h * 3600)/60;
-	if ((Terminate == 1) || (Status == 0)) {
-		if (Status)
-			(void) write(STDERR_FILENO,"\n",1);
-		return;
-	}
-	secs -= m * 60 + h * 3600;
-	if (numthreads > 1)
-		msg += sprintf(msg,"\nsummary: %d x ",numthreads);
-	else
-		msg += sprintf(msg,"\nsummary: ");
-	msg += kb2str(msg,numb);
-	msg += sprintf(msg,"Byte in ");
-	if (h > 0)
-		msg += sprintf(msg,"%d h %02d min ",h,m);
-	else if (m > 0)
-		msg += sprintf(msg,"%2d min ",m);
-	msg += sprintf(msg,"%02.1f sec - average of ",secs);
-	msg += kb2str(msg,av);
-	msg += sprintf(msg,"B/s");
-	if (EmptyCount != 0)
-		msg += sprintf(msg,", %dx empty",EmptyCount);
-	if (FullCount != 0)
-		msg += sprintf(msg,", %dx full",FullCount);
-	*msg++ = '\n';
+	if (Status)
+		*msg++ = '\n';
 #if defined(HAVE_MD5)
-	if (Hash) {
+	if ((Hash == 1) && (Terminate == 0)) {
 		unsigned char hashvalue[16];
 		int i;
 		
@@ -427,6 +400,41 @@ static void summary(unsigned long long numb, int numthreads)
 		*msg++ = '\n';
 	}
 #endif
+	if (Status == 0) {
+		if (Log != STDERR_FILENO)
+			(void) write(Log,buf,msg-buf);
+		(void) write(STDERR_FILENO,buf,msg-buf);
+		return;
+	}
+	if ((Terminate == 1) && (numthreads == 0))
+		numthreads = 1;
+	secs = now.tv_sec - Starttime.tv_sec + (double) now.tv_usec / 1000000 - (double) Starttime.tv_usec / 1000000;
+	assert(secs > 0);
+	numb >>= 10;
+	av = (double)(numb)/secs*numthreads;
+	h = (int) secs/3600;
+	m = (int) (secs - h * 3600)/60;
+	secs -= m * 60 + h * 3600;
+	if (numthreads > 1)
+		msg += sprintf(msg,"\nsummary: %d x ",numthreads);
+	else
+		msg += sprintf(msg,"\nsummary: ");
+	msg += kb2str(msg,numb);
+	msg += sprintf(msg,"Byte in ");
+	if (h > 0)
+		msg += sprintf(msg,"%d h %02d min ",h,m);
+	else if (m > 0) {
+		msg += sprintf(msg,"%2d min ",m);
+		msg += sprintf(msg,"%04.1f sec - average of ",secs);
+	} else
+		msg += sprintf(msg,"%4.1f sec - average of ",secs);
+	msg += kb2str(msg,av);
+	msg += sprintf(msg,"B/s");
+	if (EmptyCount != 0)
+		msg += sprintf(msg,", %dx empty",EmptyCount);
+	if (FullCount != 0)
+		msg += sprintf(msg,", %dx full",FullCount);
+	*msg++ = '\n';
 	*msg = '\0';
 	if (Log != STDERR_FILENO)
 		(void) write(Log,buf,msg-buf);
@@ -458,8 +466,10 @@ static RETSIGTYPE sigHandler(int signr)
 	case SIGINT:
 		ErrorOccured = 1;
 		Terminate = 1;
-		err = sem_post(&Done);
-		assert(err == 0);
+		if (TermQ[1] != -1) {
+			err = write(TermQ[1],"0",1);
+			//assert(err == 1);
+		}
 		break;
 	default:
 		(void) raise(SIGABRT);
@@ -495,19 +505,41 @@ static void statusThread(void)
 	double in = 0, out = 0, total, diff, fill;
 	unsigned long long lin = 0, lout = 0;
 	int unwritten = 1;	/* assumption: initially there is at least one unwritten block */
-
+ 	fd_set readfds;
+ 	struct timeval timeout = {0,200000};
+  
+ 	FD_ZERO(&readfds);
+ 	if (TermQ[0] != -1)
+ 		FD_SET(TermQ[0],&readfds);
 	last = Starttime;
 #ifdef __alpha
 	(void) mt_usleep(1000);	/* needed on alpha (stderr fails with fpe on nan) */
 #endif
-	while ((Numin == 0) && (Terminate == 0))
-		(void) mt_usleep(200000);
+ 	while ((Numin == 0) && (Terminate == 0) && (Finish == -1)) {
+ 		timeout.tv_sec = 0;
+ 		timeout.tv_usec = 200000;
+ 		switch (select(TermQ[0]+1,&readfds,0,0,&timeout)) {
+ 		case 0: continue;
+ 		case 1: break;
+ 		default: abort();
+ 		}
+ 	}
 	while (((Finish == -1) || (unwritten != 0)) && (Terminate == 0)) {
 		int err,numsender;
 		ssize_t nw;
 		char buf[256], *b = buf;
 
-		(void) mt_usleep(500000);
+ 		timeout.tv_sec = 0;
+ 		timeout.tv_usec = 500000;
+ 		err = select(TermQ[0]+1,&readfds,0,0,&timeout);
+ 		switch (err) {
+ 		case 0: break;
+ 		case 1: return;
+ 		case -1:
+ 			if (errno == EINTR)
+ 				break;
+ 		default: abort();
+ 		}
 		(void) gettimeofday(&now,0);
 		diff = now.tv_sec - last.tv_sec + (double) (now.tv_usec - last.tv_usec) / 1000000;
 		err = pthread_mutex_lock(&TermMut);
@@ -1123,7 +1155,7 @@ static int checkIncompleteOutput(int out, const char *outfile)
 
 
 
-static void terminateOutputThread(dest_t *d)
+static void terminateOutputThread(dest_t *d, int status)
 {
 	int err;
 
@@ -1141,9 +1173,12 @@ static void terminateOutputThread(dest_t *d)
 	infomsg("outputThread: finished - exiting...\n");
 	if (-1 == close(d->fd))
 		errormsg("error closing %s: %s\n",d->arg,strerror(errno));
-	err = sem_post(&Done);
-	assert(err == 0);
-	pthread_exit(0);
+	if (TermQ[1] != -1) {
+		err = write(TermQ[1],"0",1);
+		if (err == -1)
+			errormsg("error writing to termination queue: %s\n",strerror(errno));
+	}
+	pthread_exit((void *)status);
 }
 
 
@@ -1215,9 +1250,7 @@ static void *outputThread(void *arg)
 			if (-1 == close(dest->fd)) 
 				errormsg("error closing output %s: %s\n",dest->arg,strerror(errno));
 			dest->result = "canceled";
-			err = sem_post(&Done);
-			assert(err == 0);
-			pthread_exit((void*)1);
+			terminateOutputThread(dest,1);
 		}
 		if (Finish == at) {
 			err = sem_getvalue(&Buf2Dev,&fill);
@@ -1226,9 +1259,7 @@ static void *outputThread(void *arg)
 				if (multipleSenders)
 					(void) syncSenders((char*)0xdeadbeef,0);
 				infomsg("outputThread: finished - exiting...\n");
-				err = sem_post(&Done);
-				assert(err == 0);
-				pthread_exit((void*)haderror);
+				terminateOutputThread(dest,haderror);
 			} else {
 				blocksize = rest = Rest;
 				debugmsg("outputThread: last block has %llu bytes\n",(unsigned long long)Rest);
@@ -1287,9 +1318,7 @@ static void *outputThread(void *arg)
 					Terminate = 1;
 					err = sem_post(&Dev2Buf);
 					assert(err == 0);
-					err = sem_post(&Done);
-					assert(err == 0);
-					pthread_exit((void *) -1);
+					terminateOutputThread(dest,1);
 				}
 				debugmsg("outputThread: %d senders remaining - continuing...\n",NumSenders);
 				haderror = 1;
@@ -1311,7 +1340,7 @@ static void *outputThread(void *arg)
 			if (fill == 0) {
 				if (multipleSenders)
 					(void) syncSenders((char*)0xdeadbeef,0);
-				terminateOutputThread(dest);
+				terminateOutputThread(dest,0);
 				return 0;	/* make lint happy */
 			}
 		}
@@ -1452,7 +1481,7 @@ static void version(void)
 {
 	(void) fprintf(stderr,
 		"mbuffer version "VERSION"\n"\
-		"Copyright 2001-2008 - T. Maier-Komor\n"\
+		"Copyright 2001-2009 - T. Maier-Komor\n"\
 		"License: GPLv3 - see file LICENSE\n"\
 		"This program comes with ABSOLUTELY NO WARRANTY!!!\n"
 		"Donations via PayPal to thomas@maier-komor.de are welcome and support this work!\n"
@@ -1615,7 +1644,7 @@ int main(int argc, const char **argv)
 	unsigned short netPortIn = 0;
 	const char *client = 0;
 	unsigned short netPortOut = 0;
-	char *argv0 = strdup(argv[0]), *progname;
+	char *argv0 = strdup(argv[0]), *progname, null;
 	const char *outfile = 0;
 	struct sigaction sig;
 	dest_t *dest = 0;
@@ -1996,8 +2025,6 @@ int main(int argc, const char **argv)
 #endif
 
 	debugmsg("creating semaphores...\n");
-	if (0 != sem_init(&Done,0,0))
-		fatal("Error creating semaphore Done: %s\n",strerror(errno));
 	if (0 != sem_init(&Buf2Dev,0,0))
 		fatal("Error creating semaphore Buf2Dev: %s\n",strerror(errno));
 	if (0 != sem_init(&Dev2Buf,0,Dest ? Numblocks - 1 : Numblocks))
@@ -2154,7 +2181,16 @@ int main(int argc, const char **argv)
 		   "This can result in incorrect written data when\n"
 		   "using multiple volumes. Continue at your own risk!\n");
 #endif
-
+	if (Status) {
+		if (-1 == pipe(TermQ)) {
+			warningmsg("could not create termination pipe: %s\n",strerror(errno));
+			TermQ[0] = -1;
+			TermQ[1] = -1;
+		}
+	} else {
+		TermQ[0] = -1;
+		TermQ[1] = -1;
+	}
 	err = pthread_create(&dest->thread,0,&outputThread,dest);
 	assert(0 == err);
 	err = pthread_create(&Reader,0,&inputThread,0);
@@ -2162,10 +2198,13 @@ int main(int argc, const char **argv)
 	(void) pthread_sigmask(SIG_UNBLOCK, &signalSet, NULL);
 	if (Status) {
 		statusThread();
+	} else {
+		debugmsg("waiting for output to finish...\n");
+		if (TermQ[0] != -1) {
+			err = read(TermQ[0],&null,1);
+			assert(err == 1);
+		}
 	}
-	debugmsg("waiting for output to finish...\n");
-	err = sem_wait(&Done);
-	assert(err == 0);
 	if (Dest) {
 		dest_t *d = Dest;
 		int ret;

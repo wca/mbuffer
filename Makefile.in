@@ -4,7 +4,7 @@ CFLAGS		= @CFLAGS@ $(DEFS)
 LDFLAGS		= @LDFLAGS@
 LIBS		= @LIBS@
 EXE		= @EXEEXT@
-SHELL		= /bin/ksh
+SHELL		= /bin/sh
 
 prefix		= @prefix@
 exec_prefix     = @exec_prefix@

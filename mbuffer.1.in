@@ -25,8 +25,8 @@ with the IP of hostname will be used.
 \fB\-o\fR <\fIfilename\fP>
 Use \fIfilename\fP as output instead of the standard output (needs to be
 given for multi volume support, will enable use of sendfile if
-available). If \fIfilename\fP is -, output is written to standard
-output. The option -o can be passed multiple times to specify multiple
+available). If \fIfilename\fP is \-, output is written to standard
+output. The option \-o can be passed multiple times to specify multiple
 outputs.
 .TP 
 \fB\-O\fR <\fIhostname:port\fP>
@@ -178,9 +178,9 @@ Making a backup via network:
 .LP
 Distributing a directory tree to multiple machines:
 .LP
-\fImaster: \fPtar cf - /tree_to_clone | mbuffer -O clone0:8000 -O clone1:8000
+\fImaster: \fPtar cf \- /tree_to_clone | mbuffer \-O clone0:8000 \-O clone1:8000
 .LP
-\fIclones: \fPmbuffer -I master:8000 | tar xf -
+\fIclones: \fPmbuffer \-I master:8000 | tar xf \-
 .SH "EXITCODE"
 .LP
 mbuffer return 0 upon success. Any kind of failure will yield a non-zero

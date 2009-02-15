@@ -1,3 +1,11 @@
+20090215:
+- fix status thread hang on very small transfer sizes
+- fix libmhash initialization
+- -q should not suppress output of -H
+- reduced termination latency with status display running
+- update for summary display
+- changed default shell make shell to /bin/sh
+
 20090113:
 - fix for assertion failure of 64bit binaries in network code
 
