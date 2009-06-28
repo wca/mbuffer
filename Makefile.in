@@ -16,7 +16,7 @@ RM		= @RM@
 INSTALL		= @INSTALL@
 
 TARGET		= mbuffer$(EXE)
-SOURCES		= mbuffer.c
+SOURCES		= log.c network.c mbuffer.c
 OBJECTS		= $(SOURCES:.c=.o)
 
 .PHONY: clean all distclean install check testcleanup
@@ -42,40 +42,60 @@ install: $(TARGET)
 	$(INSTALL) mbuffer.1 $(DESTDIR)$(mandir)
 
 lint:
-	lint $(CFLAGS) mbuffer.c
+	lint $(CFLAGS) $(SOURCES)
 
-check: test0 test1 test2 testcleanup
+check: test0 test1 test2 test3 testcleanup
 
 testcleanup:
-	rm -f test0 test1 test2
+	rm -f test0 test1 test2 test3
 
 test.tar:
 	tar cf test.tar /opt/csw/gcc4
 
-testprepare: test.tar
-	openssl md5 < test.tar > testprepare
+test.md5: test.tar
+	openssl md5 < test.tar > test.md5
 
-test0: testprepare
+test0: test.md5
 	./mbuffer -i test.tar -p10 | ./mbuffer -q -P 90 | openssl md5 > test0.md5
-	diff test0.md5 testprepare
+	sync
+	diff test0.md5 test.md5
 	touch test0
 
-test1: testprepare
-	./mbuffer -i test.tar -f -o t1.tar -o /dev/null -H
-	openssl md5 < t1.tar > test1.md5
-	rm -f t1.tar
-	diff test1.md5 testprepare
-	touch test1
+test1: test.md5
+	./mbuffer -i test.tar -f -o $@.tar -o /dev/null -H
+	openssl md5 < $@.tar > $@.md5
+	rm -f $@.tar
+	sync
+	diff $@.md5 test.md5
+	touch $@
 
-test2: testprepare
-	./mbuffer -q -I :8000 | openssl md5 > test2.md5 &
+test2: test.md5
+	./mbuffer -q -I :8000 | openssl md5 > $@.md5 &
 	sleep 1
-	-rm -f t2.tar
-	./mbuffer -i test.tar -o /dev/null -O localhost:8000 -o t2.tar -H
+	-rm -f $@.tar
+	./mbuffer -i test.tar -o /dev/null -O localhost:8000 -o $@.tar -H
 	wait
-	diff test2.md5 testprepare
-	openssl md5 < t2.tar > test2.md5 
-	rm -f t2.tar
-	diff test2.md5 testprepare
-	touch test2
+	sync
+	diff $@.md5 test.md5
+	rm $@.md5
+	openssl md5 < $@.tar > $@.md5 
+	rm -f $@.tar
+	sync
+	diff $@.md5 test.md5
+	touch $@
+
+test3: test.md5
+	./mbuffer -q -6 -I :8000 | openssl md5 > $@.md5 &
+	sleep 1
+	-rm -f $@.tar
+	./mbuffer -i test.tar -o /dev/null -6 -O localhost:8000 -o $@.tar -H
+	wait
+	sync
+	diff $@.md5 test.md5
+	rm $@.md5
+	openssl md5 < $@.tar > $@.md5 
+	rm -f $@.tar
+	sync
+	diff $@.md5 test.md5
+	touch $@
 

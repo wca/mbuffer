@@ -112,7 +112,9 @@ performance hit. Others might seem to be unaffected, but just neglect
 support for full synchronous data integrity.
 .TP 
 \fB\-v\fR <\fInum\fP>
-set verbose level to \fInum\fP. Valid values are 0..5 (0 = none, 1 = errors, 2 = warnings, 4 = informations, 5 = debugging informations). Higher values include lower values messages.
+set verbose level to \fInum\fP. Valid values are 0..6 (0 = none, 1 =
+errors, 2 = warnings, 4 = informations, 5 = debugging informations, 6 =
+I/O debugging). Higher values include lower values messages.
 .TP 
 \fB\-q\fR
 quiet \- do not display the status on the standard error output
@@ -125,6 +127,13 @@ aware that this option might lead to read/write failures, if the buffer
 isn't properly aligned for direct I/O. Additionally, open might fail
 with EINVAL (i.e. invalid argument) if the named file does not support
 O_DIRECT.
+.TP 
+\fB\-6\fR
+Force IPv6 mode for following network I/O options on command line.
+\fB\-4\fR
+Force IPv4 mode for following network I/O options on command line.
+\fB\-0\fR
+Choose IPv6/IPv6 mode on demand.
 .TP 
 \fB\-h, \-\-help\fR
 Output help information and exit.

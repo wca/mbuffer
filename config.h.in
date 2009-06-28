@@ -1,3 +1,25 @@
+/*
+ *  Copyright (C) 2000-2009, Thomas Maier-Komor
+ *
+ *  This is the source code of mbuffer.
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
 /* package */
 #undef PACKAGE
 
@@ -31,6 +53,9 @@
 /* Define if you have the hstrerror function.  */
 #undef HAVE_HSTRERROR
 
+/* Define if you have the getaddrinfo function.  */
+#undef HAVE_GETADDRINFO
+
 /* Define to 1 if your `struct stat' has `st_blksize'. Deprecated, use
    `HAVE_STRUCT_STAT_ST_BLKSIZE' instead. */
 #undef HAVE_ST_BLKSIZE
@@ -48,6 +73,9 @@
 /* atoll availble? */
 #undef HAVE_ATOLL
 
+/* alloca in alloca.h */
+#undef HAVE_ALLOCA_H
+
 /* largefile support */
 #undef _LARGE_FILE
 #undef _LARGEFILE_SOURCE
@@ -56,3 +84,5 @@
 
 #undef restrict
 #undef inline
+
+#endif

@@ -1,3 +1,9 @@
+20090628:
+- added IPv6 support
+- added support for port name lookup
+- added another verbosity level for I/O messages
+- refix libmhash initialization
+
 20090215:
 - fix status thread hang on very small transfer sizes
 - fix libmhash initialization

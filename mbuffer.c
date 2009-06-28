@@ -33,10 +33,10 @@ typedef int caddr_t;
 #include <libgen.h>
 #include <limits.h>
 #include <math.h>
+#include <netdb.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <signal.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
@@ -72,7 +72,7 @@ typedef int caddr_t;
 #ifdef HAVE_LIBMHASH
 #include <mhash.h>
 static MHASH MD5ctxt;
-#define MD5_INIT(ctxt)		if ((ctxt = mhash_init(MHASH_MD5)) != MHASH_FAILED) abort()
+#define MD5_INIT(ctxt)		if ((ctxt = mhash_init(MHASH_MD5)) == MHASH_FAILED) abort()
 #define MD5_UPDATE(ctxt,at,num) mhash(ctxt,at,num)
 #define MD5_END(hash,ctxt)	mhash_deinit(ctxt,hash)
 #define HAVE_MD5 1
@@ -106,15 +106,6 @@ static MD5_CTX MD5ctxt;
 #endif
 #endif
 
-/* headers needed for networking */
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
-
 #ifdef O_LARGEFILE
 #define LARGEFILE O_LARGEFILE
 #else
@@ -127,13 +118,24 @@ static MD5_CTX MD5ctxt;
 #define DIRECT 0
 #endif
 
+
+#include "dest.h"
+#include "network.h"
+#include "log.h"
+
+char
+	*Prefix;
+int 
+	In = -1;
+size_t
+	PrefixLen = 0;
+
 static pthread_t
 	Reader;
 static long
-	Verbose = 3, In = 0, Tmp = -1, Pause = 0, Memmap = 0,
+	Tmp = -1, Pause = 0, Memmap = 0,
 	Status = 1, Nooverwrite = O_EXCL, Outblocksize = 0,
-	Autoloader = 0, Autoload_time = 0, OptSync = 0,
-	ErrorOccured = 0, TCPBufSize = 1 << 20;
+	Autoload_time = 0, OptSync = 0;
 static unsigned long
 	Outsize = 10240;
 static volatile int
@@ -150,11 +152,9 @@ static volatile unsigned long long
 static double
 	StartWrite = 0, StartRead = 1;
 static char
-	*Tmpfile = 0, **Buffer, *Prefix;
+	*Tmpfile = 0, **Buffer;
 static const char
 	*Infile = 0, *Autoload_cmd = 0;
-static size_t
-	PrefixLen = 0;
 static int
 	Multivolume = 0, Memlock = 0, TermQ[2],
 #if defined HAVE_MD5
@@ -177,23 +177,12 @@ static pthread_cond_t
 	PercHigh = PTHREAD_COND_INITIALIZER,	/* high watermark */
 	SendCond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t
-#if !defined(__sun) || defined(__linux)
-	LogMut = PTHREAD_MUTEX_INITIALIZER,
-#endif
 	TermMut = PTHREAD_MUTEX_INITIALIZER,	/* prevents statusThread from interfering with request*Volume */
 	LowMut = PTHREAD_MUTEX_INITIALIZER,
 	HighMut = PTHREAD_MUTEX_INITIALIZER,
 	SendMut = PTHREAD_MUTEX_INITIALIZER;
-static int Log = -1, Terminal = 1;
+static int Terminal = 1, Autoloader = 0;
 static struct timeval Starttime;
-
-typedef struct destination {
-	const char *arg, *name, *result;
-	int port, fd;
-	pthread_t thread;
-	struct destination *next;
-} dest_t;
-
 static dest_t *Dest = 0;
 static char *volatile SendAt = 0;
 static volatile int SendSize = 0, ActSenders = 0;
@@ -202,153 +191,6 @@ static volatile int SendSize = 0, ActSenders = 0;
 #undef assert
 #define assert(x) ((x) || (*(char *) 0 = 1))
 #endif
-
-
-#ifdef DEBUG
-static void logdebug(const char *msg, ...)
-{
-	va_list val;
-	char buf[256];
-	size_t b = PrefixLen;
-
-	va_start(val,msg);
-	(void) memcpy(buf,Prefix,b);
-	b += vsnprintf(buf + b,sizeof(buf)-b,msg,val);
-	assert(b < sizeof(buf));
-#if defined(__sun) || defined(__linux)
-	(void) write(Log,buf,b);
-#else
-	{
-		int err;
-		err = pthread_mutex_lock(&LogMut);
-		assert(err == 0);
-		(void) write(Log,buf,b);
-		err = pthread_mutex_unlock(&LogMut);
-		assert(err == 0);
-	}
-#endif
-	va_end(val);
-}
-#define debugmsg if (Verbose >= 5) logdebug
-#else
-#define debugmsg
-#endif
-
-
-static void infomsg(const char *msg, ...)
-{
-	if (Verbose >= 4) {
-		va_list val;
-		char buf[256], *b = buf + PrefixLen;
-
-		va_start(val,msg);
-		(void) memcpy(buf,Prefix,PrefixLen);
-		b += vsnprintf(b,sizeof(buf)-(b-buf),msg,val);
-		assert(b < buf + sizeof(buf));
-#if defined(__sun) || defined(__linux)
-		(void) write(Log,buf,b - buf);
-#else
-		{
-			int err;
-			err = pthread_mutex_lock(&LogMut);
-			assert(err == 0);
-			(void) write(Log,buf,b - buf);
-			err = pthread_mutex_unlock(&LogMut);
-			assert(err == 0);
-		}
-#endif
-		va_end(val);
-	}
-}
-
-
-static void warningmsg(const char *msg, ...)
-{
-	if (Verbose >= 3) {
-		va_list val;
-		char buf[256], *b = buf + PrefixLen;
-
-		va_start(val,msg);
-		(void) memcpy(buf,Prefix,PrefixLen);
-		(void) memcpy(b,"warning: ",9);
-		b += 9;
-		b += vsnprintf(b,sizeof(buf)-(b-buf),msg,val);
-		assert(b < buf + sizeof(buf));
-#if defined(__sun) || defined(__linux)
-		(void) write(Log,buf,b - buf);
-#else
-		{
-			int err;
-			err = pthread_mutex_lock(&LogMut);
-			assert(err == 0);
-			(void) write(Log,buf,b - buf);
-			err = pthread_mutex_unlock(&LogMut);
-			assert(err == 0);
-		}
-#endif
-		va_end(val);
-	}
-}
-
-
-static void errormsg(const char *msg, ...)
-{
-	ErrorOccured = 1;
-	if (Verbose >= 2) {
-		va_list val;
-		char buf[256], *b = buf + PrefixLen;
-
-		va_start(val,msg);
-		(void) memcpy(buf,Prefix,PrefixLen);
-		(void) memcpy(b,"error: ",7);
-		b += 7;
-		b += vsnprintf(b,sizeof(buf)-(b-buf),msg,val);
-		assert(b < buf + sizeof(buf));
-#if defined(__sun) || defined(__linux)
-		(void) write(Log,buf,b - buf);
-#else
-		{
-			int err;
-			err = pthread_mutex_lock(&LogMut);
-			assert(err == 0);
-			(void) write(Log,buf,b - buf);
-			err = pthread_mutex_unlock(&LogMut);
-			assert(err == 0);
-		}
-#endif
-		va_end(val);
-	}
-}
-
-
-static void fatal(const char *msg, ...)
-{
-	if (Verbose >= 1) {
-		va_list val;
-		char buf[256], *b = buf + PrefixLen;
-
-		va_start(val,msg);
-		(void) memcpy(buf,Prefix,PrefixLen);
-		(void) memcpy(b,"fatal: ",7);
-		b += 7;
-		b += vsnprintf(b,sizeof(buf)-(b-buf),msg,val);
-		assert(b < buf + sizeof(buf));
-#if defined(__sun) || defined(__linux)
-		(void) write(Log,buf,b - buf);
-#else
-		{
-			int err;
-			err = pthread_mutex_lock(&LogMut);
-			assert(err == 0);
-			(void) write(Log,buf,b - buf);
-			err = pthread_mutex_unlock(&LogMut);
-			assert(err == 0);
-		}
-#endif
-		va_end(val);
-	}
-	exit(EXIT_FAILURE);
-}
 
 
 
@@ -459,16 +301,13 @@ static void cancelAll(void)
 
 static RETSIGTYPE sigHandler(int signr)
 {
-	int err;
-
 	switch (signr) {
 	case SIGHUP:
 	case SIGINT:
-		ErrorOccured = 1;
+		ErrorOccurred = 1;
 		Terminate = 1;
 		if (TermQ[1] != -1) {
-			err = write(TermQ[1],"0",1);
-			//assert(err == 1);
+			(void) write(TermQ[1],"0",1);
 		}
 		break;
 	default:
@@ -521,6 +360,9 @@ static void statusThread(void)
  		switch (select(TermQ[0]+1,&readfds,0,0,&timeout)) {
  		case 0: continue;
  		case 1: break;
+ 		case -1:
+ 			if (errno == EINTR)
+ 				break;
  		default: abort();
  		}
  	}
@@ -567,7 +409,7 @@ static void statusThread(void)
 			b += sprintf(b,"B/s, ");
 		b += kb2str(b,total);
 		b += sprintf(b,"B total, buffer %3.0f%% full",fill);
-#ifndef __sun
+#ifdef NEED_IO_INTERLOCK
 		if (Log == STDERR_FILENO) {
 			int e;
 			e = pthread_mutex_lock(&LogMut);
@@ -655,13 +497,13 @@ static void requestInputVolume(void)
 	do {
 		if ((Autoloader) && (Infile)) {
 			int ret;
-			infomsg("requesting change of volume...\n");
 			if (Autoload_cmd) {
 				cmd = Autoload_cmd;
 			} else {
 				(void) snprintf(cmd_buf, sizeof(cmd_buf), "mt -f %s offline", Infile);
 				cmd = cmd_buf;
 			}
+			infomsg("requesting new input volume with command '%s'\n",cmd);
 			ret = system(cmd);
 			if (0 < ret) {
 				errormsg("error running \"%s\" to change volume in autoloader: exitcode %d\n",cmd,ret);
@@ -768,7 +610,7 @@ static void *inputThread(void *ignored)
 		do {
 			int in;
 			in = read(In,Buffer[at] + num,Blocksize - num);
-			debugmsg("inputThread: read(In, Buffer[%d] + %llu, %llu) = %d\n", at, num, Blocksize - num, in);
+			debugiomsg("inputThread: read(In, Buffer[%d] + %llu, %llu) = %d\n", at, num, Blocksize - num, in);
 			if ((0 == in) && (Terminal||Autoloader) && (Multivolume)) {
 				requestInputVolume();
 			} else if (-1 == in) {
@@ -912,64 +754,6 @@ static inline void terminateSender(int fd, dest_t *d, int ret)
 
 
 
-static void openNetworkOutput(dest_t *dest)
-{
-	struct sockaddr_in saddr;
-	struct hostent *h = 0;
-	int sndsize, out, err, bsize = sizeof(sndsize);
-
-	debugmsg("creating socket for output to %s:%d...\n",dest->name,dest->port);
-	out = socket(AF_INET, SOCK_STREAM, 6);
-	if (0 > out) {
-		errormsg("could not create socket for network output: %s\n",strerror(errno));
-		return;
-	}
-	err = getsockopt(out,SOL_SOCKET,SO_SNDBUF,&sndsize,&bsize);
-	assert((err == 0) && (bsize == sizeof(sndsize)));
-	if (sndsize < TCPBufSize) {
-		sndsize = TCPBufSize;
-		do {
-			err = setsockopt(out,SOL_SOCKET,SO_SNDBUF,(void *)&sndsize,sizeof(int));
-			sndsize >>= 1;
-		} while ((-1 == err) && (errno == ENOMEM));
-		if (err == -1) {
-			warningmsg("unable to set socket receive buffer size: %s\n",strerror(errno));
-		}
-	}
-	bsize = sizeof(sndsize);
-	err = getsockopt(out,SOL_SOCKET,SO_SNDBUF,&sndsize,&bsize);
-	assert(err != -1);
-	infomsg("set TCP send buffer size to %d\n",sndsize);
-	bzero((void *) &saddr, sizeof(saddr));
-	saddr.sin_port = htons(dest->port);
-	infomsg("resolving host %s...\n",dest->name);
-	if (0 == (h = gethostbyname(dest->name))) {
-#ifdef HAVE_HSTRERROR
-		dest->result = hstrerror(h_errno);
-		errormsg("could not resolve hostname %s: %s\n",dest->name,dest->result);
-#else
-		dest->result = "unable to resolve hostname";
-		errormsg("could not resolve hostname %s: error code %d\n",dest->name,h_errno);
-#endif
-		dest->fd = -1;
-		(void) close(out);
-		return;
-	}
-	saddr.sin_family = h->h_addrtype;
-	assert(h->h_length <= sizeof(saddr.sin_addr));
-	(void) memcpy(&saddr.sin_addr,h->h_addr_list[0],h->h_length);
-	infomsg("connecting to server at %s...\n",inet_ntoa(saddr.sin_addr));
-	if (0 > connect(out, (struct sockaddr *) &saddr, sizeof(saddr))) {
-		dest->result = strerror(errno);
-		errormsg("could not connect to %s:%d: %s\n",dest->name,dest->port,dest->result);
-		(void) close(out);
-		out = -1;
-	}
-	dest->fd = out;
-}
-
-
-
 static void *senderThread(void *arg)
 {
 	unsigned long long outsize = Blocksize;
@@ -1026,7 +810,7 @@ static void *senderThread(void *arg)
 			if (sendout) {
 				off_t baddr = (off_t) (SendAt+num);
 				ret = sendfile(out,SFV_FD_SELF,&baddr,rest > outsize ? outsize : rest);
-				debugmsg("sender(%s): sendfile(Out, SFV_FD_SELF, &%p, %llu) = %d\n", dest->arg, (void*)baddr, (unsigned long long) (rest > outsize ? outsize : rest), ret);
+				debugiomsg("sender(%s): sendfile(Out, SFV_FD_SELF, &%p, %llu) = %d\n", dest->arg, (void*)baddr, (unsigned long long) (rest > outsize ? outsize : rest), ret);
 				if ((ret == -1) && ((errno == EINVAL) || (errno == EOPNOTSUPP))) {
 					sendout = 0;
 					debugmsg("sender(%s): sendfile unsupported - falling back to write\n", dest->arg);
@@ -1037,7 +821,7 @@ static void *senderThread(void *arg)
 			{
 				char *baddr = SendAt+num;
 				ret = write(out,baddr,rest > outsize ? outsize :rest);
-				debugmsg("sender(%s): writing %llu@0x%p: ret = %d\n",dest->arg,rest,(void*)baddr,ret);
+				debugiomsg("sender(%s): writing %llu@0x%p: ret = %d\n",dest->arg,rest,(void*)baddr,ret);
 			}
 			if (-1 == ret) {
 				errormsg("error writing to %s: %s\n",dest->arg,strerror(errno));
@@ -1069,11 +853,11 @@ static int requestOutputVolume(int out, const char *outfile)
 			const char *cmd = Autoload_cmd;
 			int err;
 
-			infomsg("requesting change of volume...\n");
 			if (cmd == 0) {
 				(void) snprintf(cmd_buf, sizeof(cmd_buf), default_cmd, Infile);
 				cmd = cmd_buf;
 			}
+			infomsg("requesting new output volume with command '%s'\n",cmd);
 			err = system(cmd);
 			if (0 < err) {
 				errormsg("error running \"%s\" to change volume in autoloader - exitcode %d\n", cmd, err);
@@ -1365,118 +1149,6 @@ static void *outputThread(void *arg)
 
 
 
-static void openNetworkInput(const char *host, unsigned short port)
-{
-	struct sockaddr_in saddr, caddr;
-	socklen_t clen = sizeof(caddr);
-	struct hostent *h = 0, *r = 0;
-	const int reuse_addr = 1;
-	int rcvsize, sock, bsize = sizeof(rcvsize), err;
-
-	debugmsg("openNetworkInput(\"%s\",%hu)\n",host,port);
-	infomsg("creating socket for network input...\n");
-	sock = socket(AF_INET, SOCK_STREAM, 6);
-	if (0 > sock)
-		fatal("could not create socket for network input: %s\n",strerror(errno));
-	if (-1 == setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr)))
-		warningmsg("cannot set socket to reuse address: %s\n",strerror(errno));
-	err = getsockopt(sock,SOL_SOCKET,SO_RCVBUF,&rcvsize,&bsize);
-	assert((err == 0) && (bsize == sizeof(rcvsize)));
-	if (rcvsize < TCPBufSize) {
-		rcvsize = TCPBufSize;
-		do {
-			err = setsockopt(sock,SOL_SOCKET,SO_RCVBUF,(void *)&rcvsize,sizeof(int));
-			rcvsize >>= 1;
-		} while ((-1 == err) && (errno == ENOMEM));
-		if (err == -1) {
-			warningmsg("unable to set socket receive buffer size: %s\n",strerror(errno));
-		}
-	}
-	bsize = sizeof(rcvsize);
-	err = getsockopt(sock,SOL_SOCKET,SO_RCVBUF,&rcvsize,&bsize);
-	assert(err != -1);
-	infomsg("set TCP receive buffer size to %d\n",rcvsize);
-	if (host[0]) {
-		debugmsg("resolving hostname of input interface...\n");
-		if (0 == (h = gethostbyname(host)))
-#ifdef HAVE_HSTRERROR
-			fatal("could not resolve server hostname: %s\n",hstrerror(h_errno));
-#else
-			fatal("could not resolve server hostname: error code %d\n",h_errno);
-#endif
-	}
-	bzero((void *) &saddr, sizeof(saddr));
-	saddr.sin_family = AF_INET;
-	saddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	saddr.sin_port = htons(port);
-	infomsg("binding socket to port %d...\n",port);
-	if (0 > bind(sock, (struct sockaddr *) &saddr, sizeof(saddr)))
-		fatal("could not bind to socket for network input: %s\n",strerror(errno));
-	infomsg("listening on socket...\n");
-	if (0 > listen(sock,1))		/* accept only 1 incoming connection */
-		fatal("could not listen on socket for network input: %s\n",strerror(errno));
-	for (;;) {
-		char **p;
-		infomsg("waiting to accept connection...\n");
-		In = accept(sock, (struct sockaddr *)&caddr, &clen);
-		if (0 > In)
-			fatal("could not accept connection for network input: %s\n",strerror(errno));
-		if (host[0] == 0) {
-			infomsg("accepted connection from %s\n",inet_ntoa(caddr.sin_addr));
-			(void) close(sock);
-			return;
-		}
-		for (p = h->h_addr_list; *p; ++p) {
-			if (0 == memcmp(&caddr.sin_addr,*p,h->h_length)) {
-				infomsg("accepted connection from %s\n",inet_ntoa(caddr.sin_addr));
-				(void) close(sock);
-				return;
-			}
-		}
-		r = gethostbyaddr((char *)&caddr.sin_addr,sizeof(caddr.sin_addr.s_addr),AF_INET);
-		if (r)
-			warningmsg("rejected connection from %s (%s)\n",r->h_name,inet_ntoa(caddr.sin_addr));
-		else
-			warningmsg("rejected connection from %s\n",inet_ntoa(caddr.sin_addr));
-		if (-1 == close(In))
-			warningmsg("error closing rejected input: %s\n",strerror(errno));
-	}
-}
-
-
-
-static void getNetVars(const char **argv, int *c, const char **host, unsigned short *port)
-{
-	char *tmphost;
-	long p;
-	
-	tmphost = malloc(strlen(argv[*c] + 1));
-	if (0 == tmphost)
-		fatal("out of memory\n");
-	if (1 < sscanf(argv[*c],"%[0-9a-zA-Z_.-]:%hu",tmphost,port)) {
-		*host = tmphost;
-		return;
-	}
-	free((void *) tmphost);
-	if (1 == sscanf(argv[*c],":%hu",port)) {
-		return;
-	}
-	p = strtol(argv[*c],0,0);
-	if (0 != p) {
-		*port = (unsigned short) p;
-		return;
-	}
-	*host = argv[*c];
-	if ((p == 0) && (errno == EINVAL))
-		errormsg("invalid port argument: %s\n",argv[*c]);
-	else
-		*port = (unsigned short) p;
-	if (*port)
-		(*c)++;
-}
-
-
-
 static void version(void)
 {
 	(void) fprintf(stderr,
@@ -1532,7 +1204,7 @@ static void usage(void)
 		"-f         : overwrite existing files\n"
 		"-a <time>  : autoloader which needs <time> seconds to reload\n"
 		"-A <cmd>   : issue command <cmd> to request new volume\n"
-		"-v <level> : set verbose level to <level> (valid values are 0..5)\n"
+		"-v <level> : set verbose level to <level> (valid values are 0..6)\n"
 		"-q         : quiet - do not display the status on stderr\n"
 		"-c         : write with synchronous data integrity support\n"
 #ifdef O_DIRECT
@@ -1542,6 +1214,9 @@ static void usage(void)
 		"-H\n"
 		"--md5      : generate md5 hash of transfered data\n"
 #endif
+		"-4         : force use of IPv4\n"
+		"-6         : force use of IPv6\n"
+		"-0         : use IPv4 or IPv6\n"
 		"-V\n"
 		"--version  : print version information\n"
 		"Unsupported buffer options: -t -Z -B\n"
@@ -1642,7 +1317,6 @@ int main(int argc, const char **argv)
 	struct stat st;
 #endif
 	unsigned short netPortIn = 0;
-	const char *client = 0;
 	unsigned short netPortOut = 0;
 	char *argv0 = strdup(argv[0]), *progname, null;
 	const char *outfile = 0;
@@ -1670,7 +1344,6 @@ int main(int argc, const char **argv)
 	(void) strcpy(Prefix,progname);
 	Prefix[PrefixLen - 2] = ':';
 	Prefix[PrefixLen - 1] = ' ';
-	Log = STDERR_FILENO;
 	for (c = 1; c < argc; c++) {
 		if (!argcheck("-s",argv,&c,argc)) {
 			Blocksize = Outsize = calcint(argv,c,Blocksize);
@@ -1770,7 +1443,7 @@ int main(int argc, const char **argv)
 				dest->arg = "<stdout>";
 				dest->name = "<stdout>";
 			}
-			dest->port = -1;
+			dest->port = 0;
 			dest->result = 0;
 			bzero(&dest->thread,sizeof(dest->thread));
 			dest->next = Dest;
@@ -1778,27 +1451,18 @@ int main(int argc, const char **argv)
 			if (outfile == 0)
 				outfile = argv[c];
 			++NumSenders;
+		} else if (!strcmp("-0",argv[c])) {
+			AddrFam = AF_UNSPEC;
+		} else if (!strcmp("-4",argv[c])) {
+			AddrFam = AF_INET;
+		} else if (!strcmp("-6",argv[c])) {
+			AddrFam = AF_INET6;
 		} else if (!argcheck("-I",argv,&c,argc)) {
-			getNetVars(argv,&c,&client,&netPortIn);
-			if (client == 0)
-				client = "";
-			debugmsg("Network input set to %s:%hu\n",client,netPortIn);
+			initNetworkInput(argv[c]);
 		} else if (!argcheck("-O",argv,&c,argc)) {
-			const char *s = 0;
-			unsigned short p = 0;
-			getNetVars(argv,&c,&s,&p);
-			debugmsg("Output: server = %s, port = %hu\n",s,p);
-			if ((0 == p) ^ (0 == s))
-				fatal("When sending data to a network destination, both hostname and port must be set!\n");
-			debugmsg("network output: %s:%d\n",s,p);
-			dest_t *dest = malloc(sizeof(dest_t));
-			dest->arg = argv[c];
-			dest->name = s;
-			dest->port = p;
-			dest->result = 0;
-			dest->next = Dest;
-			bzero(&dest->thread,sizeof(dest->thread));
-			Dest = dest;
+			dest_t *d = createNetworkOutput(argv[c]);
+			d->next = Dest;
+			Dest = d;
 			++NumSenders;
 		} else if (!argcheck("-T",argv,&c,argc)) {
 			Tmpfile = malloc(strlen(argv[c]) + 1);
@@ -1918,8 +1582,6 @@ int main(int argc, const char **argv)
 		fatal("Setting both network input port and input file doesn't make sense!\n");
 	if (outfile && netPortOut)
 		fatal("Setting both network output and output file doesn't make sense!\n");
-	if ((0 != client) && (0 == netPortIn))
-		fatal("You need to set a network port for network input!\n");
 
 	/* multi volume input consistency checking */
 	if ((Multivolume) && (!Infile))
@@ -2042,9 +1704,7 @@ int main(int argc, const char **argv)
 			if (-1 == In)
 				fatal("could not open input file: %s\n",strerror(errno));
 		}
-	} else if (netPortIn) {
-		openNetworkInput(client,netPortIn);
-	} else {
+	} else if (In == -1) {
 		In = STDIN_FILENO;
 	}
 #ifdef __sun
@@ -2056,9 +1716,7 @@ int main(int argc, const char **argv)
 	if (Dest) {
 		dest_t *d = Dest;
 		do {
-			if (d->port != -1) {
-				openNetworkOutput(d);
-			} else if (d->fd == -1) {
+			if (d->fd == -1) {
 				mode_t mode = O_WRONLY|O_TRUNC|OptSync|LARGEFILE|Direct;
 				if (strncmp(d->arg,"/dev/",5))
 					mode |= Nooverwrite|O_CREAT;
@@ -2099,7 +1757,7 @@ int main(int argc, const char **argv)
 		assert(err != -1);
 		Dest->name = "<stdout>";
 		Dest->arg = "<stdout>";
-		Dest->port = -1;
+		Dest->port = 0;
 		Dest->result = 0;
 		Dest->next = 0;
 		bzero(&Dest->thread,sizeof(Dest->thread));
@@ -2245,7 +1903,7 @@ int main(int argc, const char **argv)
 			d = n;
 		} while (d);
 	}
-	if (ErrorOccured)
+	if (ErrorOccurred)
 		exit(EXIT_FAILURE);
 	exit(EXIT_SUCCESS);
 }
