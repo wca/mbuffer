@@ -160,7 +160,7 @@ mbuffer
 .LP 
 Using mbuffer to do a backup with tar to the default tape device. Options for this example: memory mapped temporary file with a size of 10 Megabytes, start after 80% of the buffer have been filled.
 .LP 
-tar cf \- mydirectory | gzip | mbuffer \-t \-m 10M \-p 80 \-f \-o $TAPE
+tar cf \- mydirectory | gzip | mbuffer \-t \-m 10M \-P 80 \-f \-o $TAPE
 .LP 
 .LP 
 Using mbuffer with 3 tapes for input and extracting the contents in the current work directory:

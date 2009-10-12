@@ -1,3 +1,13 @@
+20091012:
+- hash calculation is faster if done in a separate thread
+- new option --hash to select other algorithms of libmhash than md5
+- omit creation of superfluous inputThread in absence of status output
+- fix potential race condition during startup in high watermark code
+  [reported by Michal Soltys]
+- reduce number of semaphore calls in high watermark code
+- fix a potential deadlock on SIGINT
+- fixed a typo in watermark example
+
 20090628:
 - added IPv6 support
 - added support for port name lookup
