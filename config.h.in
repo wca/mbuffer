@@ -47,9 +47,6 @@
 /* Needed for thread safe compilation */
 #undef _REENTRANT
 
-/* Define if you have the strerror function.  */
-#undef HAVE_STRERROR
-
 /* Define if you have the hstrerror function.  */
 #undef HAVE_HSTRERROR
 

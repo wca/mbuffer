@@ -20,7 +20,9 @@
 #ifndef NETWORK_H
 #define NETWORK_H
 
-extern long TCPBufSize;
+#include <sys/types.h>
+
+extern int32_t TCPBufSize;
 extern int AddrFam;
 
 void initNetworkInput(const char *addr);

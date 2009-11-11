@@ -50,14 +50,14 @@ void *alloca(size_t);
 #include "log.h"
 
 extern int In;
-long TCPBufSize = 1 << 20;
-int AddrFam = AF_UNSPEC;
+int32_t TCPBufSize = 1 << 20;
+int AddrFam = PF_UNSPEC;
 
 
 static void setTCPBufferSize(int sock, unsigned buffer)
 {
-	int osize, size, err;
-	size_t bsize = sizeof(osize);
+	int err;
+	int32_t osize, size, bsize = sizeof(osize);
 
 	assert(buffer == SO_RCVBUF || buffer == SO_SNDBUF);
 	err = getsockopt(sock,SOL_SOCKET,buffer,&osize,&bsize);
@@ -88,8 +88,7 @@ static void setTCPBufferSize(int sock, unsigned buffer)
 void initNetworkInput(const char *addr)
 {
 	char *host, *port;
-	char xhost[NI_MAXHOST] = "";
-	struct addrinfo hint, *ret = 0, *x, *cinfo = 0;
+	struct addrinfo hint, *pinfo = 0, *x, *cinfo = 0;
 	int err, sock = -1, l;
 
 	debugmsg("initNetworkInput(\"%s\")\n",addr);
@@ -110,7 +109,7 @@ void initNetworkInput(const char *addr)
 		hint.ai_family = AddrFam;
 		hint.ai_protocol = IPPROTO_TCP;
 		hint.ai_socktype = SOCK_STREAM;
-		hint.ai_flags = AI_ADDRCONFIG | AI_V4MAPPED | AI_ALL;
+		hint.ai_flags = AI_ADDRCONFIG | AI_V4MAPPED;
 		err = getaddrinfo(host,0,&hint,&cinfo);
 		if (err != 0) 
 			fatal("unable to resolve address information for expected host '%s': %s\n",host,gai_strerror(err));
@@ -119,45 +118,54 @@ void initNetworkInput(const char *addr)
 	hint.ai_family = AddrFam;
 	hint.ai_protocol = IPPROTO_TCP;
 	hint.ai_socktype = SOCK_STREAM;
-	hint.ai_flags = AI_PASSIVE;
-	err = getaddrinfo(0,port,&hint,&ret);
+	hint.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
+	err = getaddrinfo(0,port,&hint,&pinfo);
 	if (err != 0)
 		fatal("unable to get address information for port/service '%s': %s\n",port,gai_strerror(err));
-	assert(ret);
-	for (x = ret; x; x = x->ai_next) {
+	assert(pinfo);
+	for (x = pinfo; x; x = x->ai_next) {
+		int reuse_addr = 1;
+		debugmsg("creating socket for address familiy %d\n",x->ai_family);
 		sock = socket(x->ai_family, SOCK_STREAM, 0);
 		if (sock == -1) {
 			warningmsg("unable to create socket for input: %s\n",strerror(errno));
 			continue;
 		}
-		if (0 == bind(sock, x->ai_addr, x->ai_addrlen))
+		if (-1 == setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr)))
+			warningmsg("cannot set socket to reuse address: %s\n",strerror(errno));
+		if (0 == bind(sock, x->ai_addr, x->ai_addrlen)) {
+			debugmsg("successfully bound socket - address length %d\n",x->ai_addrlen);
 			break;
+		}
 		warningmsg("could not bind to socket for network input: %s\n",strerror(errno));
 		(void) close(sock);
 	}
 	if (x == 0)
 		fatal("Unable to initialize network input.\n");
-
 	infomsg("listening on socket...\n");
 	if (0 > listen(sock,0))		/* accept only 1 incoming connection */
 		fatal("could not listen on socket for network input: %s\n",strerror(errno));
 	for (;;) {
-		char chost[NI_MAXHOST];
+		char chost[NI_MAXHOST], serv[NI_MAXSERV];
 		struct sockaddr_in6 caddr;
 		struct addrinfo *c;
-		size_t len = sizeof(caddr);
+		socklen_t len = sizeof(caddr);
+		int err;
 
 		debugmsg("waiting for incoming connection\n");
 		In = accept(sock, (struct sockaddr *) &caddr, &len);
 		if (0 > In)
-			fatal("Unable to accept connection for network input: %s.\n",strerror(errno));
-		if (-1 == getnameinfo((struct sockaddr *)&caddr,len,chost,sizeof(chost),0,0,NI_NUMERICHOST))
-			fatal("unable to resolve hostname of incoming connection\n",chost);
-		infomsg("incoming connection from %s\n",chost);
+			fatal("Unable to accept connection for network input: %s\n",strerror(errno));
+		err = getnameinfo((struct sockaddr *) &caddr,len,chost,sizeof(chost),serv,sizeof(serv),NI_NUMERICHOST|NI_NUMERICSERV|NI_NOFQDN);
+		if (0 != err) {
+			fatal("unable to get name information for hostname of incoming connection: %s\n",gai_strerror(err));
+		}
+		infomsg("incoming connection from %s:%s\n",chost,serv);
 		if (host == 0)
 			break;
 		for (c = cinfo; c; c = c->ai_next) {
-			if (0 == getnameinfo((struct sockaddr *)c->ai_addr,c->ai_addrlen,xhost,sizeof(xhost),0,0,NI_NUMERICHOST)) {
+			char xhost[NI_MAXHOST];
+			if (0 == getnameinfo((struct sockaddr *)c->ai_addr,c->ai_addrlen,xhost,sizeof(xhost),0,0,NI_NUMERICHOST|NI_NOFQDN)) {
 				debugmsg("checking against host '%s'\n",xhost);
 				if (0 == strcmp(xhost,chost))
 					break;
@@ -169,7 +177,7 @@ void initNetworkInput(const char *addr)
 		if (-1 == close(In))
 			warningmsg("error closing rejected input: %s\n",strerror(errno));
 	}
-	freeaddrinfo(ret);
+	freeaddrinfo(pinfo);
 	if (cinfo)
 		freeaddrinfo(cinfo);
 	debugmsg("input connection accepted\n");
@@ -197,7 +205,8 @@ dest_t *createNetworkOutput(const char *addr)
 	hint.ai_family = AddrFam;
 	hint.ai_protocol = IPPROTO_TCP;
 	hint.ai_socktype = SOCK_STREAM;
-	hint.ai_flags = AI_CANONNAME;
+	hint.ai_flags = AI_CANONNAME | AI_ADDRCONFIG | AI_V4MAPPED;
+	debugmsg("getting address info for %s\n",addr);
 	err = getaddrinfo(host,port,&hint,&ret);
 	if (err != 0)
 		fatal("unable to resolve address information for '%s': %s\n",addr,gai_strerror(err));
@@ -207,14 +216,16 @@ dest_t *createNetworkOutput(const char *addr)
 			errormsg("unable to create socket: %s\n",strerror(errno));
 			continue;
 		}
-		if (0 == connect(fd, x->ai_addr, x->ai_addrlen)) 
+		if (0 == connect(fd, x->ai_addr, x->ai_addrlen)) {
+			debugmsg("successfully connected to %s\n",addr);
 			break;
+		}
 		(void) close(fd);
 		fd = -1;
-		warningmsg("error connecting %s: %s\n",addr,strerror(errno));
+		warningmsg("error connecting to %s: %s\n",addr,strerror(errno));
 	}
 	if ((x == 0) || (fd == -1))
-		fatal("unable to connect to %s\n",addr);
+		errormsg("unable to connect to %s\n",addr);
 	freeaddrinfo(ret);
 	setTCPBufferSize(fd,SO_SNDBUF);
 	d = (dest_t *) malloc(sizeof(dest_t));
@@ -234,8 +245,7 @@ dest_t *createNetworkOutput(const char *addr)
 
 static void openNetworkInput(const char *host, unsigned short port)
 {
-	struct sockaddr_in saddr, caddr;
-	socklen_t clen = sizeof(caddr);
+	struct sockaddr_in saddr;
 	struct hostent *h = 0, *r = 0;
 	const int reuse_addr = 1;
 	int sock;
@@ -248,7 +258,7 @@ static void openNetworkInput(const char *host, unsigned short port)
 		warningmsg("cannot set socket to reuse address: %s\n",strerror(errno));
 	setTCPBufferSize(sock,SO_RCVBUF);
 	if (host[0]) {
-		debugmsg("resolving hostname of input...\n");
+		debugmsg("resolving hostname '%s' of input...\n",host);
 		if (0 == (h = gethostbyname(host)))
 #ifdef HAVE_HSTRERROR
 			fatal("could not resolve server hostname: %s\n",hstrerror(h_errno));
@@ -264,9 +274,11 @@ static void openNetworkInput(const char *host, unsigned short port)
 	if (0 > bind(sock, (struct sockaddr *) &saddr, sizeof(saddr)))
 		fatal("could not bind to socket for network input: %s\n",strerror(errno));
 	debugmsg("listening on socket...\n");
-	if (0 > listen(sock,1))		// accept only 1 incoming connection 
+	if (0 > listen(sock,1))		/* accept only 1 incoming connection */
 		fatal("could not listen on socket for network input: %s\n",strerror(errno));
 	for (;;) {
+		struct sockaddr_in caddr;
+		socklen_t clen = sizeof(caddr);
 		char **p;
 		debugmsg("waiting to accept connection...\n");
 		In = accept(sock, (struct sockaddr *)&caddr, &clen);
@@ -312,9 +324,13 @@ void initNetworkInput(const char *addr)
 	} else if (portstr == host) {
 		portstr = host + 1;
 		host = "";
+		*portstr = 0;
+	} else {
+		*portstr = 0;
+		++portstr;
 	}
 	if (1 != sscanf(portstr,"%u",&pnr))
-		fatal("port must be given by its number, not service name\n");
+		fatal("invalid port string '%s' - port must be given by its number, not service name\n", portstr);
 	openNetworkInput(host,pnr);
 }
 
@@ -329,7 +345,7 @@ static void openNetworkOutput(dest_t *dest)
 	debugmsg("creating socket for output to %s:%d...\n",dest->name,dest->port);
 	if (1 != sscanf(dest->port,"%hu",&pnr))
 		fatal("port must be given by its number, not service name\n");
-	out = socket(AF_INET, SOCK_STREAM, 6);
+	out = socket(PF_INET, SOCK_STREAM, 0);
 	if (0 > out) {
 		errormsg("could not create socket for network output: %s\n",strerror(errno));
 		return;
@@ -376,6 +392,7 @@ dest_t *createNetworkOutput(const char *addr)
 		fatal("argument '%s' doesn't match <host>:<port> format\n",addr);
 	*portstr++ = 0;
 	bzero(d, sizeof(dest_t));
+	d->fd = -1;
 	d->arg = addr;
 	d->name = host;
 	d->port = portstr;

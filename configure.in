@@ -5,7 +5,7 @@ AC_CANONICAL_SYSTEM
 AC_EXEEXT
 
 PACKAGE=mbuffer
-VERSION=20091012
+VERSION=20091110
 
 if test "${LD_LIBRARY_PATH}" != "" ; then
 	echo ""
@@ -35,6 +35,17 @@ AC_PATH_PROG(RM,rm)
 test "${USRCFLAGS}" = "" -a "${GCC}" = "yes" && CFLAGS="-g -O2 -Wall"
 test "${USRCFLAGS}" = "" -a "${GCC}" != "yes" && CFLAGS="-g -O"
 AC_SUBST(CFLAGS)
+
+cflags_tmp="$CFLAGS"
+CFLAGS=-m64
+AC_MSG_CHECKING([whether CC supports -m64])
+AC_RUN_IFELSE([AC_LANG_PROGRAM([])],
+    [AC_MSG_RESULT([yes])]
+    cflags_tmp="$cflags_tmp -m64",
+    [AC_MSG_RESULT([no])]
+)
+CFLAGS="$cflags_tmp"
+
 
 AC_HEADER_ASSERT
 AC_CHECK_LIB(pthread, pthread_mutex_init)

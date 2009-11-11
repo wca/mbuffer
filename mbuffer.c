@@ -136,7 +136,6 @@ static long
 static unsigned long
 	Outsize = 10240;
 static volatile int
-	Finish = -1,	/* this is for graceful termination */
 	Terminate = 0,	/* abort execution, because of error or signal */
 	EmptyCount = 0,	/* counter incremented when buffer runs empty */
 	FullCount = 0,	/* counter incremented when buffer gets full */
@@ -154,8 +153,12 @@ static char
 static const char
 	*Infile = 0, *Autoload_cmd = 0;
 static int
-	Multivolume = 0, Memlock = 0, TermQ[2],
-	Hashers = 0, Direct = 0, Numblocks = 512, SetOutsize = 0;
+	Memlock = 0, TermQ[2],
+	Hashers = 0, Direct = 0, SetOutsize = 0;
+static long
+	Multivolume = 0,	/* number of input volumes */
+	Finish = -1,		/* this is for graceful termination */
+	Numblocks = 512;	/* number of buffer blocks */
 
 #ifdef __sun
 #include <synch.h>
@@ -283,6 +286,7 @@ static RETSIGTYPE sigHandler(int signr)
 	case SIGINT:
 		ErrorOccurred = 1;
 		Terminate = 1;
+		(void) close(In);
 		if (TermQ[1] != -1) {
 			(void) write(TermQ[1],"0",1);
 		}
@@ -592,7 +596,8 @@ static void *inputThread(void *ignored)
 			if ((0 == in) && (Terminal||Autoloader) && (Multivolume)) {
 				requestInputVolume();
 			} else if (-1 == in) {
-				errormsg("inputThread: error reading at offset 0x%llx: %s\n",Numin*Blocksize,strerror(errno));
+				if (Terminate == 0)
+					errormsg("inputThread: error reading at offset 0x%llx: %s\n",Numin*Blocksize,strerror(errno));
 				if (num) {
 					Finish = at;
 					Rest = num;
@@ -956,10 +961,10 @@ static int requestOutputVolume(int out, const char *outfile)
 
 static int checkIncompleteOutput(int out, const char *outfile)
 {
-	static int mulretry = 0;	/* well this isn't really good design,
+	static unsigned long mulretry = 0;	/* well this isn't really good design,
 					   but better than a global variable */
 	
-	debugmsg("Outblocksize = %d, mulretry = %d\n",Outblocksize,mulretry);
+	debugmsg("Outblocksize = %ld, mulretry = %lu\n",Outblocksize,mulretry);
 	if ((0 != mulretry) || (0 == Outblocksize)) {
 		out = requestOutputVolume(out,outfile);
 		debugmsg("resetting outputsize to normal\n");
@@ -1095,8 +1100,6 @@ static void *outputThread(void *arg)
 		assert(err == 0);
 		if (Terminate) {
 			infomsg("outputThread: terminating upon termination request...\n");
-			if (-1 == close(dest->fd)) 
-				errormsg("error closing output %s: %s\n",dest->arg,strerror(errno));
 			dest->result = "canceled";
 			terminateOutputThread(dest,1);
 		}

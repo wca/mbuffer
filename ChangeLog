@@ -1,3 +1,8 @@
+20091110:
+- fix SIGINT hanging when input is idle
+- several IPv6 fixes
+- compile for 64 bit by default if available
+
 20091012:
 - hash calculation is faster if done in a separate thread
 - new option --hash to select other algorithms of libmhash than md5
