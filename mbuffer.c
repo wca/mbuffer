@@ -164,9 +164,21 @@ static long
 #include <synch.h>
 #define sem_t sema_t
 #define sem_init(a,b,c) sema_init(a,c,USYNC_THREAD,0)
-#define sem_wait sema_wait
 #define sem_post sema_post
 #define sem_getvalue(a,b) ((*(b) = (a)->count), 0)
+#if defined(__SunOS_5_8) || defined(__SunOS_5_9)
+#define sem_wait SemWait
+int SemWait(sema_t *s)
+{
+	int err;
+	do {
+		err = sema_wait(s);
+	} while (err == EINTR);
+	return err;
+}
+#else
+#define sem_wait sema_wait
+#endif
 #endif
 
 static sem_t Dev2Buf, Buf2Dev;
@@ -688,7 +700,7 @@ static inline int syncSenders(char *b, int s)
 		return 0;
 	} else {
 		ActSenders = NumSenders + 1;
-		assert(buf);
+		assert((buf != 0) || Terminate);
 		SendAt = buf;
 		SendSize = size;
 		buf = 0;
@@ -1242,7 +1254,7 @@ static void usage(void)
 	(void) fprintf(stderr,
 		"usage: mbuffer [Options]\n"
 		"Options:\n"
-		"-b <num>   : use <num> blocks for buffer (default: %d)\n"
+		"-b <num>   : use <num> blocks for buffer (default: %ld)\n"
 		"-s <size>  : use block of <size> bytes for buffer (default: %llu)\n"
 #if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__) || defined(__FreeBSD__)
 		"-m <size>  : memory <size> of buffer in b,k,M,G,%% (default: 2%% = %llu%c)\n"
@@ -1566,9 +1578,13 @@ int main(int argc, const char **argv)
 			initNetworkInput(argv[c]);
 		} else if (!argcheck("-O",argv,&c,argc)) {
 			dest_t *d = createNetworkOutput(argv[c]);
-			d->next = Dest;
-			Dest = d;
-			++NumSenders;
+			if (d->fd == -1) {
+				free(d);
+			} else {
+				d->next = Dest;
+				Dest = d;
+				++NumSenders;
+			}
 			++numOut;
 		} else if (!argcheck("-T",argv,&c,argc)) {
 			Tmpfile = malloc(strlen(argv[c]) + 1);
@@ -1859,7 +1875,7 @@ int main(int argc, const char **argv)
 	}
 	{
 		dest_t *d = Dest;
-		do {
+		while (d) {
 			if (d->fd == -1) {
 				mode_t mode = O_WRONLY|O_TRUNC|OptSync|LARGEFILE|Direct;
 				if (strncmp(d->arg,"/dev/",5))
@@ -1891,7 +1907,7 @@ int main(int argc, const char **argv)
 			}
 #endif
 			d = d->next;
-		} while (d);
+		}
 		if (NumSenders == -1) {
 			debugmsg("no output left - nothing to do\n");
 			exit(EXIT_FAILURE);

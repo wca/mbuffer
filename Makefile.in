@@ -42,7 +42,7 @@ install: $(TARGET)
 	$(INSTALL) mbuffer.1 $(DESTDIR)$(mandir)
 
 lint:
-	lint $(CFLAGS) $(SOURCES)
+	lint $(DEFS) $(SOURCES)
 
 check: test0 test1 test2 test3 testcleanup
 

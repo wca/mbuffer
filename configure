@@ -2281,7 +2281,7 @@ test -n "$target_alias" &&
 
 
 PACKAGE=mbuffer
-VERSION=20091110
+VERSION=20091122
 
 if test "${LD_LIBRARY_PATH}" != "" ; then
 	echo ""
@@ -3105,15 +3105,14 @@ fi
 
 
 
-test "${USRCFLAGS}" = "" -a "${GCC}" = "yes" && CFLAGS="-g -O2 -Wall"
-test "${USRCFLAGS}" = "" -a "${GCC}" != "yes" && CFLAGS="-g -O"
 
-
-cflags_tmp="$CFLAGS"
-CFLAGS=-m64
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether CC supports -m64" >&5
-$as_echo_n "checking whether CC supports -m64... " >&6; }
-if test "$cross_compiling" = yes; then :
+if test "${GCC}" = "yes" ; then
+	test "${USRCFLAGS}" = "" && CFLAGS="-g -O2 -Wall"
+	cflags_tmp="$CFLAGS"
+	CFLAGS="-m64"
+	{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CC supports $CFLAGS" >&5
+$as_echo_n "checking whether $CC supports $CFLAGS... " >&6; }
+	if test "$cross_compiling" = yes; then :
   { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
 $as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
 as_fn_error "cannot run test program while cross compiling
@@ -3133,17 +3132,101 @@ _ACEOF
 if ac_fn_c_try_run "$LINENO"; then :
   { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
-    cflags_tmp="$cflags_tmp -m64"
 else
   { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
+		CFLAGS=""
 
 fi
 rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
   conftest.$ac_objext conftest.beam conftest.$ac_ext
 fi
 
-CFLAGS="$cflags_tmp"
+else
+	SUNCCVERSION=`${CC} -V 2>&1 | grep Sun`
+	SUNCC=$?
+	if test "${SUNCC}" == "0" ; then
+		test "${USRCFLAGS}" = "" && CFLAGS="-g -O"
+		cflags_tmp="$CFLAGS"
+		HAS_M64=`${CC} -flags | grep m64`
+		if test "${HAS_M64}" != "" ; then
+			CFLAGS="-m64"
+			{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CC supports $CFLAGS" >&5
+$as_echo_n "checking whether $CC supports $CFLAGS... " >&6; }
+			if test "$cross_compiling" = yes; then :
+  { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
+$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
+as_fn_error "cannot run test program while cross compiling
+See \`config.log' for more details." "$LINENO" 5; }
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_run "$LINENO"; then :
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+				CFLAGS=""
+
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
+  conftest.$ac_objext conftest.beam conftest.$ac_ext
+fi
+
+		else
+			CFLAGS="-xarch=generic64"
+			{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $CC supports $CFLAGS" >&5
+$as_echo_n "checking whether $CC supports $CFLAGS... " >&6; }
+			if test "$cross_compiling" = yes; then :
+  { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
+$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
+as_fn_error "cannot run test program while cross compiling
+See \`config.log' for more details." "$LINENO" 5; }
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main ()
+{
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_run "$LINENO"; then :
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+				CFLAGS=""
+
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
+  conftest.$ac_objext conftest.beam conftest.$ac_ext
+fi
+
+		fi
+	else
+		echo unknown cc
+		test "${USRCFLAGS}" = "" && CFLAGS="-g -O"
+		cflags_tmp="$CFLAGS"
+	fi
+fi
+
+CFLAGS="$cflags_tmp $CFLAGS"
+
 
 
 
@@ -4362,7 +4445,6 @@ else
   as_fn_error "could not find the library containing name convertion functions!" "$LINENO" 5
 fi
 
-#AC_SEARCH_LIBS(hstrerror,resolv,,AC_MSG_ERROR(could not find the library containing hstrerror))
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for hstrerror in -lresolv" >&5
 $as_echo_n "checking for hstrerror in -lresolv... " >&6; }
 if test "${ac_cv_lib_resolv_hstrerror+set}" = set; then :

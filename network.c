@@ -205,7 +205,7 @@ dest_t *createNetworkOutput(const char *addr)
 	hint.ai_family = AddrFam;
 	hint.ai_protocol = IPPROTO_TCP;
 	hint.ai_socktype = SOCK_STREAM;
-	hint.ai_flags = AI_CANONNAME | AI_ADDRCONFIG | AI_V4MAPPED;
+	hint.ai_flags = AI_ADDRCONFIG;
 	debugmsg("getting address info for %s\n",addr);
 	err = getaddrinfo(host,port,&hint,&ret);
 	if (err != 0)
@@ -227,7 +227,8 @@ dest_t *createNetworkOutput(const char *addr)
 	if ((x == 0) || (fd == -1))
 		errormsg("unable to connect to %s\n",addr);
 	freeaddrinfo(ret);
-	setTCPBufferSize(fd,SO_SNDBUF);
+	if (fd != -1)
+		setTCPBufferSize(fd,SO_SNDBUF);
 	d = (dest_t *) malloc(sizeof(dest_t));
 	d->arg = addr;
 	d->name = host;

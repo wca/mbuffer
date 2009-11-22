@@ -79,7 +79,9 @@
 #undef _LARGEFILE64_SOURCE
 #undef _FILE_OFFSET_BITS
 
+#ifndef lint
 #undef restrict
 #undef inline
+#endif
 
 #endif
