@@ -51,13 +51,18 @@ void *alloca(size_t);
 
 extern int In;
 int32_t TCPBufSize = 1 << 20;
+#if defined(PF_INET6) && defined(PF_UNSPEC)
 int AddrFam = PF_UNSPEC;
+#else
+int AddrFam = PF_INET;
+#endif
 
 
 static void setTCPBufferSize(int sock, unsigned buffer)
 {
 	int err;
-	int32_t osize, size, bsize = sizeof(osize);
+	int32_t osize, size;
+	socklen_t bsize = sizeof(osize);
 
 	assert(buffer == SO_RCVBUF || buffer == SO_SNDBUF);
 	err = getsockopt(sock,SOL_SOCKET,buffer,&osize,&bsize);

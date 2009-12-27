@@ -19,6 +19,8 @@ TARGET		= mbuffer$(EXE)
 SOURCES		= log.c network.c mbuffer.c
 OBJECTS		= $(SOURCES:.c=.o)
 
+TESTTREE	= /opt/csw/gcc4
+
 .PHONY: clean all distclean install check testcleanup
 
 all: $(TARGET)
@@ -44,13 +46,14 @@ install: $(TARGET)
 lint:
 	lint $(DEFS) $(SOURCES)
 
-check: test0 test1 test2 test3 testcleanup
+check: $(TARGET) test0 test1 test2 test3 testcleanup
 
 testcleanup:
-	rm -f test0 test1 test2 test3
+	rm -f test0 test1 test2 test3 test0.md5 test1.md5 test2.md5 test3.md5 \
+		test.tar test.md5
 
 test.tar:
-	tar cf test.tar /opt/csw/gcc4
+	tar cf test.tar $(TESTTREE)
 
 test.md5: test.tar
 	openssl md5 < test.tar > test.md5

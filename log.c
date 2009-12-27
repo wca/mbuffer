@@ -19,15 +19,21 @@
 
 #include "log.h"
 
-#if !(defined(__sun) || defined(__linux))
+#if !(defined(__sun) || defined(__linux) || defined(__GLIBC__))
 #define NEED_IO_INTERLOCK
 #endif
 
 #include <assert.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__linux)
+#include <linux/limits.h>
+#elif defined(__bsd)
+#include <sys/syslimits.h>
+#endif
 #include <sys/types.h>
 #include <unistd.h>
 

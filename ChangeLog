@@ -1,3 +1,17 @@
+20091227:
+- enforceSpeedLimit must use monotonic time source to prevent being
+  disturbed by ntp
+- made test suite configurable and clean-up itself
+  (submitted by Peter Pentchev)
+- made IPv6 code optional
+- added check for block size of input device
+- only determine 64bit compile flag if no CFLAGS given
+- fix lockup on input error
+- don't cancel non-existing thread in quiet mode
+  (caused SegV on Linux)
+- BSD header inclusion update
+- SIGINT cancellation fixes (systems other than Solaris need a hack)
+
 20091122:
 - fix superfluous ai_flags causing error on Solaris 8
 - fix assertion failure after rejected connection
