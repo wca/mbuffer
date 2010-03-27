@@ -6,7 +6,7 @@ mbuffer \- measuring buffer
 mbuffer [\fIoptions\fP]
 .SH "DESCRIPTION"
 .LP 
-mbuffer buffers i/o operations and displays the throughput rate. It is
+mbuffer buffers I/O operations and displays the throughput rate. It is
 multi-threaded, supports network connections, and offers more options
 than the standard buffer.
 .SH "OPTIONS"
@@ -19,7 +19,7 @@ from standard input.
 .TP 
 \fB\-I\fR <\fIport\fP>
 Use network port \fIport\fP as input instead of the standard input. If
-given a hostname and a port in the form hostname:port the first interface 
+given a hostname and a port in the form hostname:port, the first interface
 with the IP of hostname will be used.
 .TP 
 \fB\-o\fR <\fIfilename\fP>
@@ -55,7 +55,7 @@ buffers and requires mbuffer to be set-UID root (use with care).
 device specification) [currently multi volume support is EXPERIMENTAL]
 .TP 
 \fB\-t\fR
-use a memory mapped temporary file as buffer (use with huge buffers)
+use a memory-mapped temporary file as buffer (use with huge buffers)
 .TP 
 \fB\-T\fR <\fIfile\fP>
 as \-t but use \fIfile\fP instead
@@ -85,8 +85,8 @@ pause \fInum\fP microseconds after each write \- might increase performance on s
 \fB\-r\fR <\fIrate\fP>
 Set the maximum read rate to <\fIrate\fP>. <\fIrate\fP> can be given in
 either Bytes, kBytes, MBytes, or GBytes per second. To do so, use an appropriate
-suffix (i.e. k,M,G). This options is useful if you have a tape that is
-capable to transfer data faster than the host can handle it. In this
+suffix (i.e. k,M,G). This option is useful if you have a tape that is
+capable of transferring data faster than the host can handle it. In this
 case you can use this option to limit the transfer rate and keep the
 tape running. Be aware that this is both good for your tape drive, and
 enhances overall performance, by avoiding tape screwing.
@@ -95,10 +95,10 @@ enhances overall performance, by avoiding tape screwing.
 Same as above only for setting the transfer limit for the writer.
 .TP 
 \fB\-A\fR <\fIcmd\fP>
-used devices is an autoloader which uses \fIcmd\fP to load the next volume
+the device used is an autoloader which uses \fIcmd\fP to load the next volume
 .TP 
 \fB\-a\fR <\fItime\fP>
-used device is an autoloader which takes \fItime\fP seconds to load a new tape
+the device used is an autoloader which takes \fItime\fP seconds to load a new tape
 .TP 
 \fB\-f\fR
 overwrite output file if it exists already
@@ -113,7 +113,7 @@ support for full synchronous data integrity.
 .TP 
 \fB\-v\fR <\fInum\fP>
 set verbose level to \fInum\fP. Valid values are 0..6 (0 = none, 1 =
-errors, 2 = warnings, 4 = informations, 5 = debugging informations, 6 =
+errors, 2 = warnings, 4 = information messages, 5 = debugging messages, 6 =
 I/O debugging). Higher values include lower values messages.
 .TP 
 \fB\-q\fR
@@ -129,23 +129,23 @@ with EINVAL (i.e. invalid argument) if the named file does not support
 O_DIRECT.
 .TP 
 \fB\-6\fR
-Force IPv6 mode for following network I/O options on command line.
+Force IPv6 mode for the following network I/O options on command line.
 \fB\-4\fR
-Force IPv4 mode for following network I/O options on command line.
+Force IPv4 mode for the following network I/O options on command line.
 \fB\-0\fR
-Choose IPv6/IPv6 mode on demand.
+Choose IPv4/IPv6 mode on demand.
 .TP 
 \fB\-h, \-\-help\fR
 Output help information and exit.
 .TP 
 \fB\-H, \-\-md5\fR
-Generate md5 hash of transferred data.
+Generate a MD5 hash of transferred data.
 .TP 
 \fB\-V, \-\-version\fR
 Output version information and exit.
 .SH "ENVIRONMENT VARIABLES"
-If TMPDIR is set, mbuffer allocates storage for file based buffers in this
-directory\&. If TMPDIR is unset \fI/var/tmp\fR will be used\&.
+If TMPDIR is set, mbuffer allocates storage for file-based buffers in this
+directory\&. If TMPDIR is unset, \fI/var/tmp\fR will be used\&.
 .SH "FILES"
 .LP 
 \fI@prefix@/bin/mbuffer\fP 
@@ -158,7 +158,7 @@ To run this program with the default options just type:
 mbuffer
 .LP 
 .LP 
-Using mbuffer to do a backup with tar to the default tape device. Options for this example: memory mapped temporary file with a size of 10 Megabytes, start after 80% of the buffer have been filled.
+Using mbuffer to do a backup with tar to the default tape device. Options for this example: memory-mapped temporary file with a size of 10 Megabytes, start after 80% of the buffer have been filled.
 .LP 
 tar cf \- mydirectory | gzip | mbuffer \-t \-m 10M \-P 80 \-f \-o $TAPE
 .LP 

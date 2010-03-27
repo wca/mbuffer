@@ -73,11 +73,11 @@ test1: test.md5
 	touch $@
 
 test2: test.md5
-	./mbuffer -q -I :8000 -o $@.tar -o - | openssl md5 > $@.md5 &
-	sleep 1
-	-rm -f $@.tar
-	./mbuffer -i test.tar -o /dev/null -O localhost:8000 -H
-	wait
+	./mbuffer -q -I :8000 -o $@.tar -o - | openssl md5 > $@.md5 & \
+		sleep 1; \
+		rm -f $@.tar; \
+		./mbuffer -i test.tar -o /dev/null -O localhost:8000 -H; \
+		wait
 	sync
 	diff $@.md5 test.md5
 	rm $@.md5
@@ -88,11 +88,11 @@ test2: test.md5
 	touch $@
 
 test3: test.md5
-	./mbuffer -q -6 -I :8000 | openssl md5 > $@.md5 &
-	sleep 1
-	-rm -f $@.tar
-	./mbuffer -i test.tar -o /dev/null -6 -O localhost:8000 -o $@.tar -H
-	wait
+	./mbuffer -q -6 -I :8000 | openssl md5 > $@.md5 & \
+		sleep 1; \
+		rm -f $@.tar; \
+		./mbuffer -i test.tar -o /dev/null -6 -O localhost:8000 -o $@.tar -H; \
+		wait
 	sync
 	diff $@.md5 test.md5
 	rm $@.md5

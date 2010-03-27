@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2000-2009, Thomas Maier-Komor
+ *  Copyright (C) 2000-2010, Thomas Maier-Komor
  *
  *  This is the source code of mbuffer.
  *
@@ -1265,7 +1265,7 @@ static void version(void)
 {
 	(void) fprintf(stderr,
 		"mbuffer version "VERSION"\n"\
-		"Copyright 2001-2009 - T. Maier-Komor\n"\
+		"Copyright 2001-2010 - T. Maier-Komor\n"\
 		"License: GPLv3 - see file LICENSE\n"\
 		"This program comes with ABSOLUTELY NO WARRANTY!!!\n"
 		"Donations via PayPal to thomas@maier-komor.de are welcome and support this work!\n"
@@ -1899,18 +1899,17 @@ int main(int argc, const char **argv)
 #endif
 	if (numOut == 0) {
 		dest_t *d = malloc(sizeof(dest_t));
-		d->next = Dest;
-		Dest = d;
-		Dest->fd = dup(STDOUT_FILENO);
+		d->fd = dup(STDOUT_FILENO);
 		err = dup2(STDERR_FILENO,STDOUT_FILENO);
 		assert(err != -1);
-		Dest->name = "<stdout>";
-		Dest->arg = "<stdout>";
-		Dest->port = 0;
-		Dest->result = 0;
-		Dest->next = 0;
-		bzero(&Dest->thread,sizeof(Dest->thread));
-		NumSenders = 0;
+		d->name = "<stdout>";
+		d->arg = "<stdout>";
+		d->port = 0;
+		d->result = 0;
+		bzero(&d->thread,sizeof(d->thread));
+		d->next = Dest;
+		Dest = d;
+		++NumSenders;
 	}
 	{
 		dest_t *d = Dest;
@@ -2090,7 +2089,7 @@ int main(int argc, const char **argv)
 			d = d->next;
 		} while (d);
 	}
-	if (Status)
+	if (Status || Log != STDERR_FILENO)
 		summary(Numout * Blocksize + Rest, numthreads);
 	if (Memmap) {
 		int ret = munmap(Buffer[0],Blocksize*Numblocks);

@@ -1,3 +1,9 @@
+20100327:
+- fix: hash calculation is omitted if no output is set
+- fix: test procedure doesn't wait on Solaris 8
+- some cosemtic fixes for the man page
+- summary output to logfile should be independet of quiet mode
+
 20091227:
 - enforceSpeedLimit must use monotonic time source to prevent being
   disturbed by ntp
