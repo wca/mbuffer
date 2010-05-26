@@ -1,3 +1,7 @@
+20100526:
+- fix: potential deadlock on SIGINT related to watermark algorithm
+- fix: high watermark algorithm interferes with rate limitation
+
 20100327:
 - fix: hash calculation is omitted if no output is set
 - fix: test procedure doesn't wait on Solaris 8

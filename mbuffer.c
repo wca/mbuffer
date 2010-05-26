@@ -160,6 +160,8 @@ static long
 	Multivolume = 0,	/* number of input volumes */
 	Finish = -1,		/* this is for graceful termination */
 	Numblocks = 512;	/* number of buffer blocks */
+static long long
+	TickTime = 0;
 
 static clockid_t
 	ClockSrc = CLOCK_REALTIME;
@@ -308,6 +310,10 @@ static RETSIGTYPE sigHandler(int signr)
 		if (TermQ[1] != -1) {
 			(void) write(TermQ[1],"0",1);
 		}
+		if (StartWrite > 0)
+			(void) pthread_cond_signal(&PercHigh);
+		if (StartRead < 1)
+			(void) pthread_cond_signal(&PercLow);
 		break;
 	default:
 		(void) raise(SIGABRT);
@@ -448,35 +454,33 @@ static inline long long timediff(struct timespec *restrict t1, struct timespec *
 
 static long long enforceSpeedLimit(unsigned long long limit, long long num, struct timespec *last)
 {
-	static long long ticktime = 0;
 	struct timespec now;
 	long long tdiff;
 	double dt;
 	
-	if (ticktime == 0) {
-		ticktime = 1000000 / sysconf(_SC_CLK_TCK);
-	}
 	num += Blocksize;
+	if (num < 0) {
+		debugmsg("enforceSpeedLimit(%lld,%lld): thread %d\n",limit,num,(int)pthread_self());
+		return num;
+	}
 	(void) clock_gettime(ClockSrc,&now);
 	tdiff = timediff(&now,last);
-	if (num < 0)
-		return num;
 	dt = (double)tdiff * 1E-6;
 	if (((double)num/dt) > (double)limit) {
 		double req = (double)num/limit - dt;
 		long long w = (long long) (req * 1E6);
-		if (w >= ticktime) {
+		if (w >= TickTime) {
 			long long slept;
-			debugmsg("enforceSpeedLimit(%lld,%lld): sleeping for %lld usec\n",limit,num,w);
 			(void) mt_usleep(w);
 			(void) clock_gettime(ClockSrc,last);
 			slept = timediff(last,&now);
-			debugmsg("enforceSpeedLimit(): slept for %lld usec\n",slept);
+			debugmsg("thread %d: slept for %lld usec (planned for %lld)\n",(int)pthread_self(),slept,w);
 			slept -= w;
 			if (slept >= 0)
 				return -(long long)(limit * (double)slept * 1E-6);
 			return 0;
 		} else {
+			debugmsg("thread %d: request for sleeping %lld usec delayed\n",(int)pthread_self(),w);
 			/* 
 			 * Sleeping now would cause too much of a slowdown. So
 			 * we defer this sleep until the sleeping time is
@@ -486,6 +490,7 @@ static long long enforceSpeedLimit(unsigned long long limit, long long num, stru
 			return num;
 		}
 	}
+	debugmsg("thread %d: %lld/%g (%g) <= %g\n",(int)pthread_self(),num,dt,num/dt,(double)limit);
 	return num;
 }
 
@@ -586,7 +591,7 @@ static void *inputThread(void *ignored)
 #endif
 	(void) clock_gettime(ClockSrc,&last);
 	assert(ignored == 0);
-	infomsg("inputThread: starting...\n");
+	infomsg("inputThread: starting with threadid %d...\n",(int)pthread_self());
 	for (;;) {
 		int err;
 
@@ -700,8 +705,7 @@ static void *inputThread(void *ignored)
 			err = pthread_mutex_unlock(&HighMut);
 			assert(err == 0);
 		}
-		at++;
-		if (at == Numblocks)
+		if (++at == Numblocks)
 			at = 0;
 		Numin++;
 	}
@@ -1073,8 +1077,6 @@ static void *outputThread(void *arg)
 	long long xfer = 0;
 	struct timespec last;
 
-	/* initialize last to 0, because we don't want to wait initially */
-	(void) clock_gettime(ClockSrc,&last);
 	assert(NumSenders >= 0);
 	if (dest->next) {
 		int ret;
@@ -1118,6 +1120,8 @@ static void *outputThread(void *arg)
 		assert(err == 0);
 	} else
 		infomsg("outputThread: starting output on %s...\n",dest->arg);
+	/* initialize last to 0, because we don't want to wait initially */
+	(void) clock_gettime(ClockSrc,&last);
 	for (;;) {
 		unsigned long long rest = blocksize;
 		int err;
@@ -1136,6 +1140,7 @@ static void *outputThread(void *arg)
 				pthread_cleanup_pop(0);
 				++EmptyCount;
 				debugmsg("outputThread: high watermark reached, continuing...\n");
+				(void) clock_gettime(ClockSrc,&last);
 			}
 			err = pthread_mutex_unlock(&HighMut);
 			assert(err == 0);
@@ -1225,9 +1230,8 @@ static void *outputThread(void *arg)
 			err = sem_post(&Dev2Buf);
 			assert(err == 0);
 		}
-		if (MaxWriteSpeed) {
+		if (MaxWriteSpeed)
 			xfer = enforceSpeedLimit(MaxWriteSpeed,xfer,&last);
-		}
 		if (Pause)
 			(void) mt_usleep(Pause);
 		if (Finish == at) {
@@ -1240,8 +1244,7 @@ static void *outputThread(void *arg)
 				return 0;	/* make lint happy */
 			}
 		}
-		at++;
-		if (Numblocks == at)
+		if (Numblocks == ++at)
 			at = 0;
 		if (startread < 1) {
 			err = pthread_mutex_lock(&LowMut);
@@ -1474,6 +1477,7 @@ int main(int argc, const char **argv)
 #if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__)
 	long pgsz, nump;
 
+	TickTime = 1000000 / sysconf(_SC_CLK_TCK);
 	pgsz = sysconf(_SC_PAGESIZE);
 	assert(pgsz > 0);
 	nump = sysconf(_SC_AVPHYS_PAGES);
