@@ -1,3 +1,10 @@
+20101230:
+- enhancement: hash should show up in log file
+- enhancement: report last block number on volume
+- enhancement: report times for each volume and tape changes
+- cosmetic fix: need to convert thread ids to long for linux
+- build enhancement: better cygwin and packaging environment support
+
 20100526:
 - fix: potential deadlock on SIGINT related to watermark algorithm
 - fix: high watermark algorithm interferes with rate limitation

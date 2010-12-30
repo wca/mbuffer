@@ -457,10 +457,11 @@ static long long enforceSpeedLimit(unsigned long long limit, long long num, stru
 	struct timespec now;
 	long long tdiff;
 	double dt;
+	long self = (long) pthread_self();
 	
 	num += Blocksize;
 	if (num < 0) {
-		debugmsg("enforceSpeedLimit(%lld,%lld): thread %d\n",limit,num,(int)pthread_self());
+		debugmsg("enforceSpeedLimit(%lld,%lld): thread %ld\n",limit,num,self);
 		return num;
 	}
 	(void) clock_gettime(ClockSrc,&now);
@@ -470,17 +471,15 @@ static long long enforceSpeedLimit(unsigned long long limit, long long num, stru
 		double req = (double)num/limit - dt;
 		long long w = (long long) (req * 1E6);
 		if (w >= TickTime) {
-			long long slept;
+			long long slept, ret;
 			(void) mt_usleep(w);
 			(void) clock_gettime(ClockSrc,last);
 			slept = timediff(last,&now);
-			debugmsg("thread %d: slept for %lld usec (planned for %lld)\n",(int)pthread_self(),slept,w);
-			slept -= w;
-			if (slept >= 0)
-				return -(long long)(limit * (double)slept * 1E-6);
-			return 0;
+			ret = -(long long)((double)limit * (double)(slept-w) * 1E-6);
+			debugmsg("thread %ld: slept for %lld usec (planned for %lld), ret = %lld\n",self,slept,w,ret);
+			return ret;
 		} else {
-			debugmsg("thread %d: request for sleeping %lld usec delayed\n",(int)pthread_self(),w);
+			debugmsg("thread %ld: request for sleeping %lld usec delayed\n",self,w);
 			/* 
 			 * Sleeping now would cause too much of a slowdown. So
 			 * we defer this sleep until the sleeping time is
@@ -490,7 +489,7 @@ static long long enforceSpeedLimit(unsigned long long limit, long long num, stru
 			return num;
 		}
 	}
-	debugmsg("thread %d: %lld/%g (%g) <= %g\n",(int)pthread_self(),num,dt,num/dt,(double)limit);
+	debugmsg("thread %ld: %lld/%g (%g) <= %g\n",self,num,dt,num/dt,(double)limit);
 	return num;
 }
 
@@ -498,10 +497,31 @@ static long long enforceSpeedLimit(unsigned long long limit, long long num, stru
 
 static void requestInputVolume(void)
 {
-	char cmd_buf[15+strlen(Infile)];
+	static struct timeval volstart = {0,0};
 	const char *cmd;
+	struct timeval now;
+	double diff;
+	unsigned min,hr;
+	char cmd_buf[15+strlen(Infile)];
 
 	debugmsg("requesting new volume for input\n");
+	(void) gettimeofday(&now,0);
+	if (volstart.tv_sec) 
+		diff = now.tv_sec - volstart.tv_sec + (double) (now.tv_usec - volstart.tv_usec) * 1E-6;
+	else
+		diff = now.tv_sec - Starttime.tv_sec + (double) (now.tv_usec - Starttime.tv_usec) * 1E-6;
+	if (diff > 3600) {
+		hr = (unsigned) (diff / 3600);
+		diff -= hr * 3600;
+		min = (unsigned) (diff / 60);
+		diff -= min * 60;
+		infomsg("time for reading volume: %u:%02u:%02f\n",hr,min,diff);
+	} else if (diff > 60) {
+		min = (unsigned) (diff / 60);
+		diff -= min * 60;
+		infomsg("time for reading volume: %02u:%02f\n",min,diff);
+	} else
+		infomsg("time for reading volume: %02fsec.\n",diff);
 	if (-1 == close(In))
 		errormsg("error closing input: %s\n",strerror(errno));
 	do {
@@ -558,6 +578,9 @@ static void requestInputVolume(void)
 			infomsg("direct I/O hinting failed for input: %s\n",strerror(errno));
 #endif
 	} while (In == -1);
+	(void) gettimeofday(&volstart,0);
+	diff = volstart.tv_sec - now.tv_sec + (double) (volstart.tv_usec - now.tv_usec) * 1E-6;
+	infomsg("tape-change took %fsec. - continuing with next volume\n",diff);
 	Multivolume--;
 	if (Terminal && ! Autoloader) {
 		char msg[] = "\nOK - continuing...\n";
@@ -591,7 +614,7 @@ static void *inputThread(void *ignored)
 #endif
 	(void) clock_gettime(ClockSrc,&last);
 	assert(ignored == 0);
-	infomsg("inputThread: starting with threadid %d...\n",(int)pthread_self());
+	infomsg("inputThread: starting with threadid %ld...\n",(long)pthread_self());
 	for (;;) {
 		int err;
 
@@ -929,12 +952,34 @@ static void *hashThread(void *arg)
 
 static int requestOutputVolume(int out, const char *outfile)
 {
+	static struct timeval volstart = {0,0};
+	struct timeval now;
+	double diff;
+	unsigned min,hr;
+
 	if (!outfile) {
 		errormsg("End of volume, but not end of input:\n"
 			"Output file must be given (option -o) for multi volume support!\n");
 		return -1;
 	}
-	debugmsg("requesting new output volume\n");
+	infomsg("end of volume - last block on volume: %lld\n",Numout);
+	(void) gettimeofday(&now,0);
+	if (volstart.tv_sec) 
+		diff = now.tv_sec - volstart.tv_sec + (double) (now.tv_usec - volstart.tv_usec) * 1E-6;
+	else
+		diff = now.tv_sec - Starttime.tv_sec + (double) (now.tv_usec - Starttime.tv_usec) * 1E-6;
+	if (diff > 3600) {
+		hr = (unsigned) (diff / 3600);
+		diff -= hr * 3600;
+		min = (unsigned) (diff / 60);
+		diff -= min * 60;
+		infomsg("time for writing volume: %u:%02u:%02f\n",hr,min,diff);
+	} else if (diff > 60) {
+		min = (unsigned) (diff / 60);
+		diff -= min * 60;
+		infomsg("time for writing volume: %02u:%02f\n",min,diff);
+	} else
+		infomsg("time for writing volume: %02fsec.\n",diff);
 	if (-1 == close(out))
 		errormsg("error closing output %s: %s\n",outfile,strerror(errno));
 	do {
@@ -998,7 +1043,9 @@ static int requestOutputVolume(int out, const char *outfile)
 			infomsg("direct I/O hinting failed for output: %s\n",strerror(errno));
 #endif
 	} while (-1 == out);
-	infomsg("continuing with next volume\n");
+	(void) gettimeofday(&volstart,0);
+	diff = volstart.tv_sec - now.tv_sec + (double) (volstart.tv_usec - now.tv_usec) * 1E-6;
+	infomsg("tape-change took %fsec. - continuing with next volume\n",diff);
 	if (Terminal && ! Autoloader) {
 		char msg[] = "\nOK - continuing...\n";
 		(void) write(STDERR_FILENO,msg,sizeof(msg));
@@ -1711,20 +1758,20 @@ int main(int argc, const char **argv)
 			++c;
 #if HAVE_LIBMHASH
 			if (!strcmp(argv[c],"list")) {
-				fprintf(stderr,"valid hash functions are:\n");
+				(void) fprintf(stderr,"valid hash functions are:\n");
 				int algo = mhash_count();
 				while (algo >= 0) {
 					const char *algoname = (const char *) mhash_get_hash_name_static(algo);
 					if (algoname)
-						fprintf(stderr,"\t%s\n",algoname);
+						(void) fprintf(stderr,"\t%s\n",algoname);
 					--algo;
 				}
 				exit(EXIT_SUCCESS);
 			}
 #elif defined HAVE_MD5
 			if (!strcmp(argv[c],"list")) {
-				fprintf(stderr,"valid hash functions are:\n");
-				fprintf(stderr,"\tmd5\n");
+				(void) fprintf(stderr,"valid hash functions are:\n");
+				(void) fprintf(stderr,"\tmd5\n");
 				exit(EXIT_SUCCESS);
 			}
 #else
@@ -2077,8 +2124,8 @@ int main(int argc, const char **argv)
 		if (Terminate)
 			cancelAll();
 		do {
-			void *status;
 			if (d->name) {
+				void *status;
 				if (d->arg) {
 					debugmsg("joining sender for %s\n",d->arg);
 				} else {
@@ -2106,10 +2153,13 @@ int main(int argc, const char **argv)
 		do {
 			dest_t *n = d->next;
 			if (d->result) {
-				if (d->arg)
+				if (d->arg) {
 					warningmsg("error during output to %s: %s\n",d->arg,d->result);
-				else
-					write(STDERR_FILENO,d->result,strlen(d->result));
+				} else {
+					(void) write(STDERR_FILENO,d->result,strlen(d->result));
+					if (Log != STDERR_FILENO) 
+						(void) write(Log,d->result,strlen(d->result));
+				}
 			}
 			free(d);
 			d = n;

@@ -1,11 +1,12 @@
 CC		= @CC@
 DEFS		= @DEFS@
-CFLAGS		= @CFLAGS@ $(DEFS)
+CFLAGS		= @CFLAGS@ $(DEFS) -I@srcdir@
 LDFLAGS		= @LDFLAGS@
 LIBS		= @LIBS@
 EXE		= @EXEEXT@
 SHELL		= /bin/sh
 
+VPATH		= @srcdir@
 prefix		= @prefix@
 exec_prefix     = @exec_prefix@
 datarootdir	= @datarootdir@
