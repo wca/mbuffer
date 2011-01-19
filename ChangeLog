@@ -1,3 +1,9 @@
+20110119:
+- Anniversary: 10 years of mbuffer
+- fix for building on cygwin in a separate directory
+- fix: incorrect sanity check concerning hashing and multivolume support
+  (patch by Sean Walmsley)
+
 20101230:
 - enhancement: hash should show up in log file
 - enhancement: report last block number on volume

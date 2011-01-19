@@ -1,6 +1,6 @@
 CC		= @CC@
 DEFS		= @DEFS@
-CFLAGS		= @CFLAGS@ $(DEFS) -I@srcdir@
+CFLAGS		= @CFLAGS@ $(DEFS) -I@srcdir@ -I.
 LDFLAGS		= @LDFLAGS@
 LIBS		= @LIBS@
 EXE		= @EXEEXT@
