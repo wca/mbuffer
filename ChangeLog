@@ -1,3 +1,9 @@
+20110317:
+- fix: terminate ASAP if no working output is available
+- enhancement: added option to terminate on any error
+- fix: mbuffer blocks on SIGTTIN when started in background
+- fix: display correct dimensions (e.g. kiB instead of kB)
+
 20110119:
 - Anniversary: 10 years of mbuffer
 - fix for building on cygwin in a separate directory

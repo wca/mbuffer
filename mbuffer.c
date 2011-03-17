@@ -213,7 +213,7 @@ static volatile int SendSize = 0, ActSenders = 0;
 
 static int kb2str(char *s, double v)
 {
-	const char *dim = "kMGT", *f;
+	const char *dim = "KMGT", *f;
 
 	while (v > 10000.0) {
 		v /= 1024.0;
@@ -226,10 +226,10 @@ static int kb2str(char *s, double v)
 	if (v < 0)
 		f = " ??? ";
 	else if (v < 100)
-		f = "%4.1f %c";
+		f = "%4.1f %ci";
 	else if (v < 10000) {
 		v = rint(v);
-		f = "%4.0f %c";
+		f = "%4.0f %ci";
 	} else
 		f = "%5.lg ";
 	return sprintf(s,f,v,*dim);
@@ -1369,6 +1369,7 @@ static void usage(void)
 		"-v <level> : set verbose level to <level> (valid values are 0..6)\n"
 		"-q         : quiet - do not display the status on stderr\n"
 		"-c         : write with synchronous data integrity support\n"
+		"-e         : stop processing on any kind of error\n"
 #ifdef O_DIRECT
 		"--direct   : open input and output with O_DIRECT\n"
 #endif
@@ -1702,6 +1703,9 @@ int main(int argc, const char **argv)
 		} else if (!strcmp("-c",argv[c])) {
 			debugmsg("enabling full synchronous I/O\n");
 			OptSync = O_SYNC;
+		} else if (!strcmp("-e",argv[c])) {
+			debugmsg("will terminate on any kind of error\n");
+			ErrorsFatal = 1;
 		} else if (!argcheck("-a",argv,&c,argc)) {
 			long at = strtol(argv[c],0,0) - 1;
 			if ((at == 0) && (errno == EINVAL)) 
@@ -1997,13 +2001,14 @@ int main(int argc, const char **argv)
 #endif
 			d = d->next;
 		}
-		if (NumSenders == -1) {
-			debugmsg("no output left - nothing to do\n");
-			exit(EXIT_FAILURE);
-		}
+	}
+	if (NumSenders == -1) {
+		fatal("no output left - nothing to do\n");
 	}
 
 	debugmsg("checking if we have a controlling terminal...\n");
+	err = sigignore(SIGTTIN);
+	assert(err == 0);
 	fl = fcntl(STDERR_FILENO,F_GETFL);
 	err = fcntl(STDERR_FILENO,F_SETFL,fl | O_NONBLOCK);
 	assert(err == 0);

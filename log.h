@@ -31,7 +31,7 @@
 extern pthread_mutex_t LogMut;
 #endif
 
-extern int Verbose, Log, ErrorOccurred;
+extern int Verbose, Log, ErrorOccurred, ErrorsFatal;
 
 #ifdef DEBUG
 void logdebug(const char *msg, ...);

@@ -37,7 +37,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-int Verbose = 3, Log = STDERR_FILENO, ErrorOccurred = 0;
+int Verbose = 3, Log = STDERR_FILENO, ErrorOccurred = 0, ErrorsFatal = 0;
 extern char *Prefix;
 extern size_t PrefixLen;
 
@@ -175,6 +175,10 @@ void errormsg(const char *msg, ...)
 		(void) write(Log,buf,s);
 #endif
 		va_end(val);
+	}
+	if (ErrorsFatal) {
+		close(Log);
+		exit(EXIT_FAILURE);
 	}
 }
 
