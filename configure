@@ -688,8 +688,7 @@ CFLAGS
 LDFLAGS
 LIBS
 CPPFLAGS
-CPP
-CPPFLAGS'
+CPP'
 
 
 # Initialize some variables set by options.
@@ -2355,7 +2354,7 @@ test -n "$target_alias" &&
 
 
 PACKAGE=mbuffer
-VERSION=20110317
+VERSION=20110724
 
 if test "${LD_LIBRARY_PATH}" != "" ; then
 	echo ""

@@ -26,6 +26,7 @@ typedef struct destination {
 	struct destination *next;
 	const char *arg, *name, *port, *result;
 	int fd;
+	int mode;
 	pthread_t thread;
 } dest_t;
 

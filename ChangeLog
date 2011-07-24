@@ -1,3 +1,11 @@
+20110724:
+- fix: garbage might be written after input error
+- enhancement: prompt for additional volumes for argument "-n 0"
+- enhancement: prompt for next volume on I/O error if -n is set
+  (some tape devices incorrectly return -1/EIO instead of 0)
+- enhancement: added option to append to output file
+- update: remove use of deprecated interface sigignore
+
 20110317:
 - fix: terminate ASAP if no working output is available
 - enhancement: added option to terminate on any error

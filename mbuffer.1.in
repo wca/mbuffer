@@ -52,7 +52,8 @@ buffers and requires mbuffer to be set-UID root (use with care).
 .TP 
 \fB\-n\fR <\fInum\fP>
 \fInum\fP volumes in input device (requires use of option \-i for input
-device specification) [currently multi volume support is EXPERIMENTAL]
+device specification, pass 0 as argument if mbuffer should prompt for every
+new volume)
 .TP 
 \fB\-t\fR
 use a memory-mapped temporary file as buffer (use with huge buffers)
@@ -127,6 +128,10 @@ aware that this option might lead to read/write failures, if the buffer
 isn't properly aligned for direct I/O. Additionally, open might fail
 with EINVAL (i.e. invalid argument) if the named file does not support
 O_DIRECT.
+\fB\-\-append\fR
+Open next output file given via option -o in append mode.
+\fB\-\-truncate\fR
+Truncate next output file given via option -o when opening it.
 .TP 
 \fB\-6\fR
 Force IPv6 mode for the following network I/O options on command line.

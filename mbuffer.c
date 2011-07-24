@@ -132,7 +132,7 @@ static pthread_t
 	Reader;
 static long
 	Tmp = -1, Pause = 0, Memmap = 0,
-	Status = 1, Nooverwrite = O_EXCL, Outblocksize = 0,
+	Status = 1, Append = O_CREAT, Nooverwrite = O_EXCL, Outblocksize = 0,
 	Autoload_time = 0, OptSync = 0;
 static unsigned long
 	Outsize = 10240;
@@ -157,7 +157,7 @@ static int
 	Memlock = 0, TermQ[2],
 	Hashers = 0, Direct = 0, SetOutsize = 0;
 static long
-	Multivolume = 0,	/* number of input volumes */
+	NumVolumes = 1,		/* number of input volumes, 0 for interactive prompting */
 	Finish = -1,		/* this is for graceful termination */
 	Numblocks = 512;	/* number of buffer blocks */
 static long long
@@ -495,7 +495,61 @@ static long long enforceSpeedLimit(unsigned long long limit, long long num, stru
 
 
 
-static void requestInputVolume(void)
+static int promptInteractive(unsigned at, unsigned num)
+{
+	static const char prompt[] = "\nContinue with next volume? Press 'y' to continue or 'n' to finish...";
+	static const char contmsg[] = "\nyes - continuing with next volume...\n";
+	static const char donemsg[] = "\nno - input done, waiting for output to finish...\n";
+	int err;
+
+	err = pthread_mutex_lock(&TermMut);
+	assert(0 == err);
+	if (-1 == write(STDERR_FILENO,prompt,sizeof(prompt))) {
+		errormsg("error accessing controlling terminal for manual volume change request: %s\nConsider using autoload option, when running mbuffer without terminal.\n",strerror(errno));
+		Terminate = 1;
+		pthread_exit((void *) -1);
+	}
+	for (;;) {
+		char c = 0;
+		if (-1 == read(STDERR_FILENO,&c,1) && (errno != EINTR)) {
+			errormsg("error accessing controlling terminal for manual volume change request: %s\nConsider using autoload option, when running mbuffer without terminal.\n",strerror(errno));
+			Terminate = 1;
+			pthread_exit((void *) -1);
+		}
+		debugmsg("prompt input %c\n",c);
+		switch (c) {
+		case 'n':
+		case 'N':
+			Rest = num;
+			(void) write(STDERR_FILENO,donemsg,sizeof(donemsg));
+			err = pthread_mutex_lock(&HighMut);
+			assert(err == 0);
+			err = sem_post(&Buf2Dev);
+			assert(err == 0);
+			err = pthread_cond_signal(&PercHigh);
+			assert(err == 0);
+			err = pthread_mutex_unlock(&HighMut);
+			assert(err == 0);
+			err = pthread_mutex_unlock(&TermMut);
+			assert(0 == err);
+			Finish = at;
+			if (Status)
+				pthread_exit(0);
+			return 0;
+		case 'y':
+		case 'Y':
+			(void) write(STDERR_FILENO,contmsg,sizeof(contmsg));
+			err = pthread_mutex_unlock(&TermMut);
+			assert(0 == err);
+			return 1;
+		default:;
+		}
+	}
+}
+
+
+
+static int requestInputVolume(unsigned at, unsigned num)
 {
 	static struct timeval volstart = {0,0};
 	const char *cmd;
@@ -536,9 +590,9 @@ static void requestInputVolume(void)
 			infomsg("requesting new input volume with command '%s'\n",cmd);
 			ret = system(cmd);
 			if (0 < ret) {
-				errormsg("error running \"%s\" to change volume in autoloader: exitcode %d\n",cmd,ret);
+				warningmsg("error running \"%s\" to change volume in autoloader: exitcode %d\n",cmd,ret);
 				Terminate = 1;
-				pthread_exit((void *) -1);
+				pthread_exit((void *) 0);
 			} else if (0 > ret) {
 				errormsg("error starting \"%s\" to change volume in autoloader: %s\n", cmd, strerror(errno));
 				Terminate = 1;
@@ -549,24 +603,8 @@ static void requestInputVolume(void)
 				(void) sleep(Autoload_time);
 			}
 		} else {
-			int err;
-			char c = 0, msg[] = "\ninsert next volume and press return to continue...";
-			err = pthread_mutex_lock(&TermMut);
-			assert(0 == err);
-			if (-1 == write(STDERR_FILENO,msg,sizeof(msg))) {
-				errormsg("error accessing controlling terminal for manual volume change request: %s\nConsider using autoload option, when running mbuffer without terminal.\n",strerror(errno));
-				Terminate = 1;
-				pthread_exit((void *) -1);
-			}
-			do {
-				if (-1 == read(STDERR_FILENO,&c,1) && (errno != EINTR)) {
-					errormsg("error accessing controlling terminal for manual volume change request: %s\nConsider using autoload option, when running mbuffer without terminal.\n",strerror(errno));
-					Terminate = 1;
-					pthread_exit((void *) -1);
-				}
-			} while (c != '\n');
-			err = pthread_mutex_unlock(&TermMut);
-			assert(0 == err);
+			if (0 == promptInteractive(at,num))
+				return 0;
 		}
 		In = open(Infile, O_RDONLY | LARGEFILE | Direct);
 		if ((-1 == In) && (errno == EINVAL))
@@ -581,11 +619,12 @@ static void requestInputVolume(void)
 	(void) gettimeofday(&volstart,0);
 	diff = volstart.tv_sec - now.tv_sec + (double) (volstart.tv_usec - now.tv_usec) * 1E-6;
 	infomsg("tape-change took %fsec. - continuing with next volume\n",diff);
-	Multivolume--;
+	NumVolumes--;
 	if (Terminal && ! Autoloader) {
 		char msg[] = "\nOK - continuing...\n";
 		(void) write(STDERR_FILENO,msg,sizeof(msg));
 	}
+	return 1;
 }
 
 
@@ -664,36 +703,17 @@ static void *inputThread(void *ignored)
 #endif
 			in = read(In,Buffer[at] + num,Blocksize - num);
 			debugiomsg("inputThread: read(In, Buffer[%d] + %llu, %llu) = %d\n", at, num, Blocksize - num, in);
-			if ((0 == in) && (Terminal||Autoloader) && (Multivolume)) {
-				requestInputVolume();
-			} else if (-1 == in) {
-				if (Terminate == 0)
+			if (in > 0) {
+				num += in;
+			} else if ((0 == in) && (Terminal||Autoloader) && (NumVolumes != 1)) {
+				if (0 == requestInputVolume(at,num))
+					return 0;
+			} else if ((-1 == in) && (errno == EIO) && (Terminal||Autoloader) && (NumVolumes != 1)) {
+				requestInputVolume(at,num);
+			} else if (in <= 0) {
+				/* error or end-of-file */
+				if ((-1 == in) && (Terminate == 0))
 					errormsg("inputThread: error reading at offset 0x%llx: %s\n",Numin*Blocksize,strerror(errno));
-				Rest = 0;
-				Finish = at;
-				if (num) {
-					Finish = at;
-					Rest = num;
-				} else if (at > 0) {
-					Finish = at-1;
-					Rest = 0;
-				} else {
-					Finish = Numblocks;
-					Rest = 0;
-				}
-				err = sem_post(&Buf2Dev);
-				assert(err == 0);
-				err = pthread_mutex_lock(&HighMut);
-				assert(err == 0);
-				err = pthread_cond_signal(&PercHigh);
-				assert(err == 0);
-				err = pthread_mutex_unlock(&HighMut);
-				assert(err == 0);
-				infomsg("inputThread: exiting...\n");
-				if (Status)
-					pthread_exit((void *) -1);
-				return (void *) -1;
-			} else if (0 == in) {
 				Rest = num;
 				Finish = at;
 				debugmsg("inputThread: last block has %llu bytes\n",num);
@@ -707,10 +727,9 @@ static void *inputThread(void *ignored)
 				assert(err == 0);
 				infomsg("inputThread: exiting...\n");
 				if (Status)
-					pthread_exit(0);
-				return 0;
+					pthread_exit((void *) in);
+				return (void *) in;
 			}
-			num += in;
 		} while (num < Blocksize);
 		if (MaxReadSpeed)
 			xfer = enforceSpeedLimit(MaxReadSpeed,xfer,&last);
@@ -862,7 +881,7 @@ static void *senderThread(void *arg)
 			if (sendout) {
 				off_t baddr = (off_t) (SendAt+num);
 				ret = sendfile(out,SFV_FD_SELF,&baddr,rest > outsize ? outsize : rest);
-				debugiomsg("sender(%s): sendfile(Out, SFV_FD_SELF, &%p, %llu) = %d\n", dest->arg, (void*)baddr, (unsigned long long) (rest > outsize ? outsize : rest), ret);
+				debugiomsg("sender(%s): sendfile(%d, SFV_FD_SELF, &%p, %llu) = %d\n", dest->arg, dest->fd, (void*)baddr, (unsigned long long) (rest > outsize ? outsize : rest), ret);
 				if ((ret == -1) && ((errno == EINVAL) || (errno == EOPNOTSUPP))) {
 					sendout = 0;
 					debugmsg("sender(%s): sendfile unsupported - falling back to write\n", dest->arg);
@@ -1237,7 +1256,7 @@ static void *outputThread(void *arg)
 			if (sendout) {
 				off_t baddr = (off_t) (Buffer[at] + blocksize - rest);
 				num = sendfile(out,SFV_FD_SELF,&baddr,(size_t)(rest > Outsize ? Outsize : rest));
-				debugiomsg("outputThread: sendfile(out, SFV_FD_SELF, &(Buffer[%d] + %llu), %llu) = %d\n", at, blocksize - rest, rest > Outsize ? Outsize : rest, num);
+				debugiomsg("outputThread: sendfile(%d, SFV_FD_SELF, &(Buffer[%d] + %llu), %llu) = %d\n", out, at, blocksize - rest, rest > Outsize ? Outsize : rest, num);
 				if ((num == -1) && ((errno == EOPNOTSUPP) || (errno == EINVAL))) {
 					infomsg("sendfile not supported - falling back to write...\n");
 					sendout = 0;
@@ -1353,10 +1372,12 @@ static void usage(void)
 		"-p <num>   : start reading after buffer has been filled less than <num>%%\n"
 		"-i <file>  : use <file> for input\n"
 		"-o <file>  : use <file> for output (this option can be passed MULTIPLE times)\n"
+		"--append   : append to output file (must be passed before -o)\n"
+		"--truncate : truncate next file (must be passed before -o)\n"
 		"-I <h>:<p> : use network port <port> as input, allow only host <h> to connect\n"
 		"-I <p>     : use network port <port> as input\n"
 		"-O <h>:<p> : output data to host <h> and port <p> (MUTLIPLE outputs supported)\n"
-		"-n <num>   : <num> volumes for input\n"
+		"-n <num>   : <num> volumes for input, '0' to prompt interactively\n"
 		"-t         : use memory mapped temporary file (for huge buffer)\n"
 		"-T <file>  : as -t but uses <file> as buffer\n"
 		"-l <file>  : use <file> for logging messages\n"
@@ -1507,11 +1528,51 @@ static void addHashAlgorithm(const char *name)
 }
 
 
+static void openDestinationFiles(dest_t *d)
+{
+	while (d) {
+		if (d->fd == -1) {
+			if (0 == strncmp(d->arg,"/dev/",5))
+				d->mode &= ~O_EXCL;
+			d->fd = open(d->arg,d->mode,0666);
+			if ((-1 == d->fd) && (errno == EINVAL)) {
+				d->mode &= ~LARGEFILE;
+				d->fd = open(d->arg,d->mode,0666);
+			}
+			if ((-1 == d->fd) && (errno == EINVAL)) {
+				d->mode &= ~O_TRUNC;
+				d->fd = open(d->arg,d->mode,0666);
+			}
+			if (-1 == d->fd) {
+				d->result = strerror(errno);
+				errormsg("unable to open output %s: %s\n",d->arg,strerror(errno));
+			} else {
+				debugmsg("successfully opened destination file %s with fd %d\n",d->arg,d->fd);
+			}
+		}
+		if (-1 == d->fd) {
+			d->name = 0;	/* tag destination as unstartable */
+			--NumSenders;
+		}
+#ifdef __sun
+		else if (d->arg) {
+			if (0 == directio(d->fd,DIRECTIO_ON))
+				infomsg("direct I/O hinting enabled for output to %s\n",d->arg);
+			else
+				infomsg("direct I/O hinting failed for output to %s: %s\n",d->arg,strerror(errno));
+		}
+#endif
+		d = d->next;
+	}
+}
+
 int main(int argc, const char **argv)
 {
 	unsigned long long totalmem = 0;
+	int optMset = 0, optSset = 0, optBset = 0, optMode = O_EXCL, numOut = 0;
+	int  numstdout = 0, numthreads = 0;
 	long mxnrsem;
-	int err, optMset = 0, optSset = 0, optBset = 0, c, fl, numstdout = 0, numthreads = 0, numOut = 0;
+	int c, fl, err;
 	sigset_t       signalSet;
 #ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
 	struct stat st;
@@ -1556,6 +1617,12 @@ int main(int argc, const char **argv)
 			debugmsg("Blocksize = %llu\n",Blocksize);
 			if (Blocksize < 100)
 				fatal("cannot set blocksize as percentage of total physical memory\n");
+		} else if (!strcmp("--append",argv[c])) {
+			optMode = O_APPEND;
+			debugmsg("append to next file\n");
+		} else if (!strcmp("--truncate",argv[c])) {
+			optMode = O_TRUNC;
+			debugmsg("truncate next file\n");
 		} else if (!argcheck("-m",argv,&c,argc)) {
 			totalmem = calcint(argv,c,totalmem);
 			optMset = 1;
@@ -1615,14 +1682,14 @@ int main(int argc, const char **argv)
 			MaxWriteSpeed = calcint(argv,c,0);
 			debugmsg("MaxWriteSpeed = %lld\n",MaxWriteSpeed);
 		} else if (!argcheck("-n",argv,&c,argc)) {
-			long mv = strtol(argv[c],0,0) - 1;
-			if ((mv == 0) && (errno == EINVAL)) 
-				errormsg("invalid argument to option -n: \"%s\"\n",argv[c]);
+			long nv = strtol(argv[c],0,0);
+			if ((nv < 0) || ((nv == 0) && (errno == EINVAL)))
+				fatal("invalid argument to option -n: \"%s\"\n",argv[c]);
 			else
-				Multivolume = mv;
-			if (Multivolume < 0)
+				NumVolumes = nv;
+			if (NumVolumes < 0)
 				fatal("argument for number of volumes must be > 0\n");
-			debugmsg("Multivolume = %d\n",Multivolume);
+			debugmsg("NumVolumes = %d\n",NumVolumes);
 		} else if (!argcheck("-i",argv,&c,argc)) {
 			if (strcmp(argv[c],"-")) {
 				Infile = argv[c];
@@ -1638,6 +1705,7 @@ int main(int argc, const char **argv)
 				dest->arg = argv[c];
 				dest->name = argv[c];
 				dest->fd = -1;
+				dest->mode = O_CREAT|O_WRONLY|optMode|Direct|LARGEFILE|OptSync;
 			} else {
 				if (numstdout++) 
 					fatal("cannot output multiple times to stdout");
@@ -1647,7 +1715,9 @@ int main(int argc, const char **argv)
 				assert(err != -1);
 				dest->arg = "<stdout>";
 				dest->name = "<stdout>";
+				dest->mode = 0;
 			}
+			optMode = Nooverwrite;
 			dest->port = 0;
 			dest->result = 0;
 			bzero(&dest->thread,sizeof(dest->thread));
@@ -1823,7 +1893,7 @@ int main(int argc, const char **argv)
 		fatal("Setting both network output and output file doesn't make sense!\n");
 
 	/* multi volume input consistency checking */
-	if ((Multivolume) && (!Infile))
+	if ((NumVolumes != 1) && (!Infile))
 		fatal("multi volume support for input needs an explicit given input device (option -i)\n");
 
 	/* SPW: Volsize consistency checking */
@@ -1966,48 +2036,14 @@ int main(int argc, const char **argv)
 		Dest = d;
 		++NumSenders;
 	}
-	{
-		dest_t *d = Dest;
-		while (d) {
-			if (d->fd == -1) {
-				mode_t mode = O_WRONLY|O_TRUNC|OptSync|LARGEFILE|Direct;
-				if (strncmp(d->arg,"/dev/",5))
-					mode |= Nooverwrite|O_CREAT;
-				d->fd = open(d->arg,mode,0666);
-				if ((-1 == d->fd) && (errno == EINVAL)) {
-					mode &= ~LARGEFILE;
-					d->fd = open(d->arg,mode,0666);
-				}
-				if ((-1 == d->fd) && (errno == EINVAL)) {
-					mode &= ~O_TRUNC;
-					d->fd = open(d->arg,mode,0666);
-				}
-				if (-1 == d->fd) {
-					d->result = strerror(errno);
-					errormsg("unable to open output %s: %s\n",d->arg,strerror(errno));
-				}
-			}
-			if (-1 == d->fd) {
-				d->name = 0;	/* tag destination as unstartable */
-				--NumSenders;
-			}
-#ifdef __sun
-			else if (d->arg) {
-				if (0 == directio(d->fd,DIRECTIO_ON))
-					infomsg("direct I/O hinting enabled for output to %s\n",d->arg);
-				else
-					infomsg("direct I/O hinting failed for output to %s: %s\n",d->arg,strerror(errno));
-			}
-#endif
-			d = d->next;
-		}
-	}
+	openDestinationFiles(Dest);
 	if (NumSenders == -1) {
 		fatal("no output left - nothing to do\n");
 	}
 
 	debugmsg("checking if we have a controlling terminal...\n");
-	err = sigignore(SIGTTIN);
+	sig.sa_sigaction = SIG_IGN;
+	err = sigaction(SIGTTIN,&sig,0);
 	assert(err == 0);
 	fl = fcntl(STDERR_FILENO,F_GETFL);
 	err = fcntl(STDERR_FILENO,F_SETFL,fl | O_NONBLOCK);
@@ -2026,6 +2062,18 @@ int main(int argc, const char **argv)
 	}
 	err = fcntl(STDERR_FILENO,F_SETFL,fl);
 	assert(err == 0);
+	if ((Terminal == 1) && (NumVolumes != 1)) {
+		struct termios tset;
+		if (-1 == tcgetattr(STDERR_FILENO,&tset)) {
+			warningmsg("unable to get terminal attributes: %s\n",strerror(errno));
+		} else {
+			tset.c_lflag &= (~ICANON) & (~ECHO);
+			tset.c_cc[VTIME] = 0;
+			tset.c_cc[VMIN] = 1;
+			if (-1 == tcsetattr(STDERR_FILENO,TCSANOW,&tset))
+				warningmsg("unable to set terminal attributes: %s\n",strerror(errno));
+		}
+	}
 
 	debugmsg("registering signals...\n");
 	sig.sa_handler = sigHandler;
