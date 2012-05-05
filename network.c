@@ -114,7 +114,11 @@ void initNetworkInput(const char *addr)
 		hint.ai_family = AddrFam;
 		hint.ai_protocol = IPPROTO_TCP;
 		hint.ai_socktype = SOCK_STREAM;
+#ifdef __FreeBSD__
+		hint.ai_flags = AI_ADDRCONFIG;
+#else
 		hint.ai_flags = AI_ADDRCONFIG | AI_V4MAPPED;
+#endif
 		err = getaddrinfo(host,0,&hint,&cinfo);
 		if (err != 0) 
 			fatal("unable to resolve address information for expected host '%s': %s\n",host,gai_strerror(err));

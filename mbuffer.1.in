@@ -11,35 +11,35 @@ multi-threaded, supports network connections, and offers more options
 than the standard buffer.
 .SH "OPTIONS"
 .LP 
-.TP 
+.TP
 \fB\-i\fR <\fIfilename\fP>
 Use \fIfilename\fP as input instead of the standard input (needs to be
 given for multi volume support). If \fIfilename\fP is -, input is read
 from standard input.
-.TP 
+.TP
 \fB\-I\fR <\fIport\fP>
 Use network port \fIport\fP as input instead of the standard input. If
 given a hostname and a port in the form hostname:port, the first interface
 with the IP of hostname will be used.
-.TP 
+.TP
 \fB\-o\fR <\fIfilename\fP>
 Use \fIfilename\fP as output instead of the standard output (needs to be
 given for multi volume support, will enable use of sendfile if
 available). If \fIfilename\fP is \-, output is written to standard
 output. The option \-o can be passed multiple times to specify multiple
 outputs.
-.TP 
+.TP
 \fB\-O\fR <\fIhostname:port\fP>
 Write output to \fIhostname:port\fP instead of the standard output (will
 enable use of sendfile if available). This option can be used multiple
 times to send data to multiple machines.
-.TP 
+.TP
 \fB\-b\fR <\fInum\fP>
 Use \fInum\fP blocks for buffer (default 256).
-.TP 
+.TP
 \fB\-s\fR <\fIsize\fP>
 Use blocks of \fIsize\fP bytes for buffer (default pagesize of system).
-.TP 
+.TP
 \fB\-m\fR <\fIsize\fP>
 Use a total of \fIsize\fP bytes for buffer (default 2MB) - size can be
 set with a trailing character (b and B for Byte, k for kByte, M for
@@ -119,6 +119,7 @@ I/O debugging). Higher values include lower values messages.
 .TP 
 \fB\-q\fR
 quiet \- do not display the status on the standard error output
+.TP 
 \fB\-\-direct\fR
 Use O_DIRECT to open file descriptors. This option is not available on
 all systems. It tells the OS to bypass the page cache to improve
@@ -128,8 +129,10 @@ aware that this option might lead to read/write failures, if the buffer
 isn't properly aligned for direct I/O. Additionally, open might fail
 with EINVAL (i.e. invalid argument) if the named file does not support
 O_DIRECT.
+.TP 
 \fB\-\-append\fR
 Open next output file given via option -o in append mode.
+.TP 
 \fB\-\-truncate\fR
 Truncate next output file given via option -o when opening it.
 .TP 

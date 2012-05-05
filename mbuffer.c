@@ -279,7 +279,8 @@ static void summary(unsigned long long numb, int numthreads)
 	*msg = '\0';
 	if (Log != STDERR_FILENO)
 		(void) write(Log,buf,msg-buf);
-	(void) write(STDERR_FILENO,buf,msg-buf);
+	if (Status)
+		(void) write(STDERR_FILENO,buf,msg-buf);
 }
 
 
@@ -740,7 +741,7 @@ static void *inputThread(void *ignored)
 			assert(err == 0);
 			err = sem_getvalue(&Buf2Dev,&fill);
 			assert(err == 0);
-			if (((double) fill / (double) Numblocks) >= startwrite) {
+			if (((double) fill / (double) Numblocks) + DBL_EPSILON >= startwrite) {
 				err = pthread_cond_signal(&PercHigh);
 				assert(err == 0);
 			}
@@ -1998,7 +1999,7 @@ int main(int argc, const char **argv)
 	debugmsg("creating semaphores...\n");
 	if (0 != sem_init(&Buf2Dev,0,0))
 		fatal("Error creating semaphore Buf2Dev: %s\n",strerror(errno));
-	if (0 != sem_init(&Dev2Buf,0,Dest ? Numblocks - 1 : Numblocks))
+	if (0 != sem_init(&Dev2Buf,0, Numblocks))
 		fatal("Error creating semaphore Dev2Buf: %s\n",strerror(errno));
 
 	debugmsg("opening input...\n");

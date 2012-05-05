@@ -2354,7 +2354,7 @@ test -n "$target_alias" &&
 
 
 PACKAGE=mbuffer
-VERSION=20110724
+VERSION=20120505
 
 if test "${LD_LIBRARY_PATH}" != "" ; then
 	echo ""

@@ -1,3 +1,8 @@
+20120505:
+- fixed IPv6 client initialization on FreeBSD
+- fix: suppress summary on stderr if -q is used with -l
+- fix: option -P 100 may lead to hang
+
 20110724:
 - fix: garbage might be written after input error
 - enhancement: prompt for additional volumes for argument "-n 0"
