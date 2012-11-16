@@ -151,6 +151,14 @@ Generate a MD5 hash of transferred data.
 .TP 
 \fB\-V, \-\-version\fR
 Output version information and exit.
+.TP 
+\fB\-W\fR <\fItimeout\fP>
+Activates a watchdog that gets triggered every \fItimeout\fP seconds and
+checks weather I/O activity has stalled. If either channel has stalled
+for a complete period, the watchdog writes an error message and
+terminates mbuffer via SIGINT. Be aware that the watchdog is unaware of
+tape-change activities. So choose the watchdog timeout greater that the
+worst-case tape-change time.
 .SH "ENVIRONMENT VARIABLES"
 If TMPDIR is set, mbuffer allocates storage for file-based buffers in this
 directory\&. If TMPDIR is unset, \fI/var/tmp\fR will be used\&.

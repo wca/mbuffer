@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2000-2011, Thomas Maier-Komor
+ *  Copyright (C) 2000-2012, Thomas Maier-Komor
  *
  *  This is the source code of mbuffer.
  *
@@ -30,6 +30,7 @@ typedef int caddr_t;
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <float.h>
 #include <libgen.h>
 #include <limits.h>
 #include <math.h>
@@ -129,10 +130,10 @@ size_t
 	PrefixLen = 0;
 
 static pthread_t
-	Reader;
+	Reader, Watchdog;
 static long
 	Tmp = -1, Pause = 0, Memmap = 0,
-	Status = 1, Append = O_CREAT, Nooverwrite = O_EXCL, Outblocksize = 0,
+	Status = 1, Nooverwrite = O_EXCL, Outblocksize = 0,
 	Autoload_time = 0, OptSync = 0;
 static unsigned long
 	Outsize = 10240;
@@ -342,6 +343,29 @@ static int mt_usleep(unsigned long sleep_usecs)
 	return -1;
 }
 
+
+
+static void *watchdogThread(void *timeout)
+{
+	unsigned long ni = Numin, no = Numout;
+	unsigned t = (unsigned) timeout;
+	for (;;) {
+		sleep(t);
+		if ((ni == Numin) && (Finish == -1)) {
+			errormsg("watchdog timeout: input stalled; sending SIGINT\n");
+			kill(getpid(),SIGINT);
+		}
+		if (no == Numout) {
+			errormsg("watchdog timeout: output stalled; sending SIGINT\n");
+			kill(getpid(),SIGINT);
+		}
+		ni = Numin;
+		no = Numout;
+	}
+#ifdef __GNUC__
+	return 0;	// suppresses a gcc warning
+#endif
+}
 
 
 static void statusThread(void) 
@@ -817,7 +841,7 @@ static inline void terminateSender(int fd, dest_t *d, int ret)
 			errormsg("error closing file %s: %s\n",d->arg,strerror(errno));
 	}
 	if (ret != 0) {
-		int ret = syncSenders(0,-1);
+		ret = syncSenders(0,-1);
 		debugmsg("terminateSender(%s): sendSender(0,-1) = %d\n",d->arg,ret);
 	}
 	pthread_exit((void *) ret);
@@ -1408,51 +1432,51 @@ static void usage(void)
 		"Unsupported buffer options: -t -Z -B\n"
 		,Numblocks
 		,Blocksize
-		,m,*dim
+		,m
+		,*dim
 		);
 	exit(EXIT_SUCCESS);
 }
 
 
-
-static unsigned long long calcint(const char **argv, int c, unsigned long long d)
+static unsigned long long calcint(const char **argv, int c, unsigned long long def)
 {
 	char ch;
-	unsigned long long i;
+	double d = (double)def;
 	
-	switch (sscanf(argv[c],"%llu%c",&i,&ch)) {
+	switch (sscanf(argv[c],"%lf%c",&d,&ch)) {
 	default:
 		assert(0);
 		break;
 	case 2:
-		if (i == 0)
+		if (d <= 0)
 			fatal("invalid argument - must be > 0\n");
 		switch (ch) {
 		case 'k':
 		case 'K':
-			i <<= 10;
-			return i;
+			d *= 1024.0;
+			return (unsigned long long) d;
 		case 'm':
 		case 'M':
-			i <<= 20;
-			return i;
+			d *= 1024.0*1024.0;
+			return (unsigned long long) d;
 		case 'g':
 		case 'G':
-			i <<= 30;
-			return i;
+			d *= 1024.0*1024.0*1024.0;
+			return (unsigned long long) d;
 		case 't':
 		case 'T':
-			i <<= 40;
-			return i;
+			d *= 1024.0*1024.0*1024.0*1024.0;
+			return (unsigned long long) d;
 		case '%':
-			if (i >= 100)
-				fatal("invalid value for percentage (must be < 100)\n");
-			return i;
+			if ((d >= 90) || (d <= 0))
+				fatal("invalid value for percentage (must be 0..90)\n");
+			return (unsigned long long) d;
 		case 'b':
 		case 'B':
-			if (i < 128)
+			if (d < 128)
 				fatal("invalid value for number of bytes\n");
-			return i;
+			return (unsigned long long) d;
 		default:
 			if (argv[c][-2] == '-')
 				fatal("unrecognized size charakter \"%c\" for option \"%s\"\n",ch,&argv[c][-2]);
@@ -1461,13 +1485,15 @@ static unsigned long long calcint(const char **argv, int c, unsigned long long d
 			return d;
 		}
 	case 1:
-		if (i <= 100) {
+		if (d <= 0)
+			fatal("invalid argument - must be > 0\n");
+		if (d <= 100) {
 			if (argv[c][-2] == '-')
 				fatal("invalid low value for option \"%s\" - missing suffix?\n",&argv[c][-2]);
 			else
 				fatal("invalid low value for option \"%s\" - missing suffix?\n",argv[c-1]);
 		}
-		return i;
+		return d;
 	case 0:
 		break;
 	}
@@ -1572,7 +1598,7 @@ int main(int argc, const char **argv)
 	unsigned long long totalmem = 0;
 	int optMset = 0, optSset = 0, optBset = 0, optMode = O_EXCL, numOut = 0;
 	int  numstdout = 0, numthreads = 0;
-	long mxnrsem;
+	long mxnrsem, timeout = 0;
 	int c, fl, err;
 	sigset_t       signalSet;
 #ifdef HAVE_STRUCT_STAT_ST_BLKSIZE
@@ -1585,7 +1611,7 @@ int main(int argc, const char **argv)
 	struct sigaction sig;
 	dest_t *dest = 0;
 #if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE) && !defined(__CYGWIN__)
-	long pgsz, nump;
+	long long pgsz, nump;
 
 	TickTime = 1000000 / sysconf(_SC_CLK_TCK);
 	pgsz = sysconf(_SC_PAGESIZE);
@@ -1709,7 +1735,7 @@ int main(int argc, const char **argv)
 				dest->mode = O_CREAT|O_WRONLY|optMode|Direct|LARGEFILE|OptSync;
 			} else {
 				if (numstdout++) 
-					fatal("cannot output multiple times to stdout");
+					fatal("cannot output multiple times to stdout\n");
 				debugmsg("output to stdout\n",argv[c]);
 				dest->fd = dup(STDOUT_FILENO);
 				err = dup2(STDERR_FILENO,STDOUT_FILENO);
@@ -1785,6 +1811,8 @@ int main(int argc, const char **argv)
 				Autoloader = 1;
 				Autoload_time = at;
 			}
+			if (at && timeout && timeout <= Autoload_time)
+				fatal("autoload time must be smaller than watchdog timeout\n");
 			debugmsg("Autoloader time = %d\n",Autoload_time);
 		} else if (!argcheck("-A",argv,&c,argc)) {
 			Autoloader = 1;
@@ -1795,7 +1823,7 @@ int main(int argc, const char **argv)
 				StartWrite = 0;
 			StartWrite /= 100;
 			if ((StartWrite > 1) || (StartWrite <= 0))
-				fatal("error in argument -P: must be bigger than 0 and less or equal 100");
+				fatal("error in argument -P: must be bigger than 0 and less or equal 100\n");
 			debugmsg("StartWrite = %1.2lf\n",StartWrite);
 		} else if (!argcheck("-p",argv,&c,argc)) {
 			if (1 == sscanf(argv[c],"%lf",&StartRead))
@@ -1803,7 +1831,7 @@ int main(int argc, const char **argv)
 			else
 				StartRead = 1.0;
 			if ((StartRead >= 1) || (StartRead < 0))
-				fatal("error in argument -p: must be bigger or equal to 0 and less than 100");
+				fatal("error in argument -p: must be bigger or equal to 0 and less than 100\n");
 			debugmsg("StartRead = %1.2lf\n",StartRead);
 		} else if (!strcmp("-L",argv[c])) {
 #ifdef _POSIX_MEMLOCK_RANGE
@@ -1812,6 +1840,12 @@ int main(int argc, const char **argv)
 #else
 			warning("POSIX memory locking is unsupported on this system.\n");
 #endif
+		} else if (!argcheck("-W",argv,&c,argc)) {
+			timeout = strtol(argv[c],0,0);
+			if (timeout <= 0)
+				fatal("invalid argument to option -W\n");
+			if (timeout <= Autoload_time)
+				fatal("timeout must be bigger than autoload time\n");
 		} else if (!strcmp("--direct",argv[c])) {
 #ifdef O_DIRECT
 			debugmsg("using O_DIRECT to open file descriptors\n");
@@ -1864,7 +1898,7 @@ int main(int argc, const char **argv)
 	if (optBset&optSset&optMset) {
 		if (Numblocks * Blocksize != totalmem)
 			fatal("inconsistent options: blocksize * number of blocks != totalsize!\n");
-	} else if ((!optBset&optSset&optMset) || (optMset&!optBset&!optSset)) {
+	} else if (((!optBset)&optSset&optMset) || (optMset&(!optBset)&(!optSset))) {
 		if (totalmem <= Blocksize)
 			fatal("total memory must be larger than block size\n");
 		Numblocks = totalmem / Blocksize;
@@ -2153,6 +2187,10 @@ int main(int argc, const char **argv)
 	}
 	err = pthread_create(&dest->thread,0,&outputThread,dest);
 	assert(0 == err);
+	if (timeout) {
+		err = pthread_create(&Watchdog,0,&watchdogThread,(void*)timeout);
+		assert(0 == err);
+	}
 	if (Status) {
 		err = pthread_create(&Reader,0,&inputThread,0);
 		assert(0 == err);
@@ -2169,6 +2207,10 @@ int main(int argc, const char **argv)
 			err = read(TermQ[0],&null,1);
 			assert(err == 1);
 		}
+	}
+	if (timeout) {
+		err = pthread_cancel(Watchdog);
+		assert(err == 0);
 	}
 	if (Dest) {
 		dest_t *d = Dest;

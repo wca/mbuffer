@@ -5,7 +5,7 @@ AC_CANONICAL_SYSTEM
 AC_EXEEXT
 
 PACKAGE=mbuffer
-VERSION=20120505
+VERSION=20121111
 
 if test "${LD_LIBRARY_PATH}" != "" ; then
 	echo ""
@@ -26,6 +26,7 @@ test "$exec_prefix" = NONE && exec_prefix=$prefix
 USRCFLAGS=${CFLAGS}
 
 AC_LANG_C
+AC_PROG_CC_C99
 AC_PROG_CC(cc gcc)
 AC_C_RESTRICT
 AC_C_INLINE

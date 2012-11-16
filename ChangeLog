@@ -1,3 +1,10 @@
+20121111:
+- build fix for some platforms
+- several minor code cleanups (removed some warnings)
+- support float values as argument to memory options
+- added a watchdog that terminates mbuffer if input
+  or output activity stalls (option -W)
+
 20120505:
 - fixed IPv6 client initialization on FreeBSD
 - fix: suppress summary on stderr if -q is used with -l

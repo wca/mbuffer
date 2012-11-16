@@ -37,6 +37,9 @@ extern int Verbose, Log, ErrorOccurred, ErrorsFatal;
 void logdebug(const char *msg, ...);
 #define debugmsg if (Verbose >= 5) logdebug
 #define debugiomsg if (Verbose >= 6) logdebug
+#elif __STDC_VERSION__ >= 199901L
+#define debugmsg(...)
+#define debugiomsg(...)
 #else
 #define debugmsg
 #define debugiomsg
