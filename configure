@@ -2372,7 +2372,7 @@ test -n "$target_alias" &&
 
 
 PACKAGE=mbuffer
-VERSION=20121111
+VERSION=20130209
 
 if test "${LD_LIBRARY_PATH}" != "" ; then
 	echo ""
@@ -5678,132 +5678,15 @@ if test "$ac_res" != no; then :
 _ACEOF
 
 else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for library containing MD5Init" >&5
-$as_echo_n "checking for library containing MD5Init... " >&6; }
-if ${ac_cv_search_MD5Init+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  ac_func_search_save_LIBS=$LIBS
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-#ifdef __cplusplus
-extern "C"
-#endif
-char MD5Init ();
-int
-main ()
-{
-return MD5Init ();
-  ;
-  return 0;
-}
-_ACEOF
-for ac_lib in '' md5; do
-  if test -z "$ac_lib"; then
-    ac_res="none required"
-  else
-    ac_res=-l$ac_lib
-    LIBS="-l$ac_lib  $ac_func_search_save_LIBS"
-  fi
-  if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_search_MD5Init=$ac_res
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext
-  if ${ac_cv_search_MD5Init+:} false; then :
-  break
-fi
-done
-if ${ac_cv_search_MD5Init+:} false; then :
-
-else
-  ac_cv_search_MD5Init=no
-fi
-rm conftest.$ac_ext
-LIBS=$ac_func_search_save_LIBS
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_search_MD5Init" >&5
-$as_echo "$ac_cv_search_MD5Init" >&6; }
-ac_res=$ac_cv_search_MD5Init
-if test "$ac_res" != no; then :
-  test "$ac_res" = "none required" || LIBS="$ac_res $LIBS"
-  cat >>confdefs.h <<_ACEOF
-#define HAVE_LIBMD5 1
-_ACEOF
-
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for library containing MD5_Init" >&5
-$as_echo_n "checking for library containing MD5_Init... " >&6; }
-if ${ac_cv_search_MD5_Init+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  ac_func_search_save_LIBS=$LIBS
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-#ifdef __cplusplus
-extern "C"
-#endif
-char MD5_Init ();
-int
-main ()
-{
-return MD5_Init ();
-  ;
-  return 0;
-}
-_ACEOF
-for ac_lib in '' crypto; do
-  if test -z "$ac_lib"; then
-    ac_res="none required"
-  else
-    ac_res=-l$ac_lib
-    LIBS="-l$ac_lib  $ac_func_search_save_LIBS"
-  fi
-  if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_search_MD5_Init=$ac_res
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext
-  if ${ac_cv_search_MD5_Init+:} false; then :
-  break
-fi
-done
-if ${ac_cv_search_MD5_Init+:} false; then :
-
-else
-  ac_cv_search_MD5_Init=no
-fi
-rm conftest.$ac_ext
-LIBS=$ac_func_search_save_LIBS
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_search_MD5_Init" >&5
-$as_echo "$ac_cv_search_MD5_Init" >&6; }
-ac_res=$ac_cv_search_MD5_Init
-if test "$ac_res" != no; then :
-  test "$ac_res" = "none required" || LIBS="$ac_res $LIBS"
-  cat >>confdefs.h <<_ACEOF
-#define HAVE_LIBCRYPTO 1
-_ACEOF
-
-else
-  if test x$enable_md5 = xauto ; then
+  #AC_SEARCH_LIBS(MD5Init,md5,AC_DEFINE_UNQUOTED(HAVE_LIBMD5),
+	#AC_SEARCH_LIBS(MD5_Init,crypto,AC_DEFINE_UNQUOTED(HAVE_LIBCRYPTO),
+		if test x$enable_md5 = xauto ; then
 			{ $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: could not find a library containing the md5 hash functions - md5 support disabled" >&5
 $as_echo "$as_me: WARNING: could not find a library containing the md5 hash functions - md5 support disabled" >&2;}
 		else
 			as_fn_error $? "could not find the mhash library" "$LINENO" 5
 		fi
-
-fi
-
-fi
+	#)))
 
 fi
 

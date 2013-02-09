@@ -1521,24 +1521,24 @@ static int argcheck(const char *opt, const char **argv, int *c, int argc)
 
 static void addHashAlgorithm(const char *name)
 {
-	const char *algoname = "";
+	const char *algoname;
 	int algo = 0;
 #if HAVE_LIBMHASH
 	int numalgo = mhash_count();
 
 	while (algo <= numalgo) {
 		algoname = (const char *) mhash_get_hash_name_static(algo);
-		if (algoname && (strcmp(algoname,name) == 0))
+		if (algoname && (strcasecmp(algoname,name) == 0))
 			break;
 		++algo;
 	}
 #else
 	algoname = "MD5";
 #endif
-	if (strcmp(algoname,name) == 0) {
+	if (strcasecmp(algoname,name) == 0) {
 		dest_t *dest = malloc(sizeof(dest_t));
 		bzero(dest,sizeof(dest_t));
-		dest->name = name;
+		dest->name = algoname;
 		dest->fd = algo;
 		if (Dest) {
 			dest->next = Dest->next;
@@ -1865,6 +1865,8 @@ int main(int argc, const char **argv)
 #endif
 		} else if (!strcmp("--hash",argv[c])) {
 			++c;
+			if (c == argc)
+				fatal("missing argument to option --hash\n");
 #if HAVE_LIBMHASH
 			if (!strcmp(argv[c],"list")) {
 				(void) fprintf(stderr,"valid hash functions are:\n");
@@ -1880,7 +1882,7 @@ int main(int argc, const char **argv)
 #elif defined HAVE_MD5
 			if (!strcmp(argv[c],"list")) {
 				(void) fprintf(stderr,"valid hash functions are:\n");
-				(void) fprintf(stderr,"\tmd5\n");
+				(void) fprintf(stderr,"\tMD5\n");
 				exit(EXIT_SUCCESS);
 			}
 #else

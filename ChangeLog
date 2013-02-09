@@ -1,3 +1,9 @@
+20130209:
+- hash names should be compared case insensitive for convenience
+- safeguard against missing argument to option --hash
+- support for hash calculation withdrawn, due to potential data
+corruption, when the buffer runs full
+
 20121111:
 - build fix for some platforms
 - several minor code cleanups (removed some warnings)
