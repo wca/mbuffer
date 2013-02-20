@@ -1,3 +1,11 @@
+20130220:
+- reverted incorrect fix for -P 100, which may lead to data corruption
+- reenable hash libraries (no correlation with data corruption)
+- bail out if any output fails to initialize
+- refixed hang on -P 100
+- reduced sending overhead
+- fixed handling of option -f
+
 20130209:
 - hash names should be compared case insensitive for convenience
 - safeguard against missing argument to option --hash

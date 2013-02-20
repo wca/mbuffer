@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2000-2012, Thomas Maier-Komor
+ *  Copyright (C) 2000-2013, Thomas Maier-Komor
  *
  *  This is the source code of mbuffer.
  *
@@ -133,7 +133,7 @@ static pthread_t
 	Reader, Watchdog;
 static long
 	Tmp = -1, Pause = 0, Memmap = 0,
-	Status = 1, Nooverwrite = O_EXCL, Outblocksize = 0,
+	Status = 1, Outblocksize = 0,
 	Autoload_time = 0, OptSync = 0;
 static unsigned long
 	Outsize = 10240;
@@ -782,7 +782,7 @@ static void *inputThread(void *ignored)
 
 static inline int syncSenders(char *b, int s)
 {
-	static volatile int size = 0;
+	static volatile int size = 0, skipped = 0;
 	static char *volatile buf = 0;
 	int err;
 
@@ -808,9 +808,15 @@ static inline int syncSenders(char *b, int s)
 		SendAt = buf;
 		SendSize = size;
 		buf = 0;
+		if (skipped) {
+			// after the first time, always give a buffer free after sync
+			err = sem_post(&Dev2Buf);
+			assert(err == 0);
+		} else {
+			// the first time no buffer has been given free
+			skipped = 1;
+		}
 		err = pthread_mutex_unlock(&SendMut);
-		assert(err == 0);
-		err = sem_post(&Dev2Buf);
 		assert(err == 0);
 		debugiomsg("syncSenders(): send %d@%p, BROADCAST\n",SendSize,SendAt);
 		err = pthread_cond_broadcast(&SendCond);
@@ -905,8 +911,9 @@ static void *senderThread(void *arg)
 #ifdef HAVE_SENDFILE
 			if (sendout) {
 				off_t baddr = (off_t) (SendAt+num);
-				ret = sendfile(out,SFV_FD_SELF,&baddr,rest > outsize ? outsize : rest);
-				debugiomsg("sender(%s): sendfile(%d, SFV_FD_SELF, &%p, %llu) = %d\n", dest->arg, dest->fd, (void*)baddr, (unsigned long long) (rest > outsize ? outsize : rest), ret);
+				unsigned long long n = SetOutsize ? (rest > Outsize ? (rest/Outsize)*Outsize : rest) : rest;
+				ret = sendfile(out,SFV_FD_SELF,&baddr,n);
+				debugiomsg("sender(%s): sendfile(%d, SFV_FD_SELF, &%p, %llu) = %d\n", dest->arg, dest->fd, (void*)baddr, n, ret);
 				if ((ret == -1) && ((errno == EINVAL) || (errno == EOPNOTSUPP))) {
 					sendout = 0;
 					debugmsg("sender(%s): sendfile unsupported - falling back to write\n", dest->arg);
@@ -1078,7 +1085,7 @@ static int requestOutputVolume(int out, const char *outfile)
 		}
 		mode = O_WRONLY|O_TRUNC|OptSync|LARGEFILE|Direct;
 		if (strncmp(outfile,"/dev/",5))
-			mode |= Nooverwrite|O_CREAT;
+			mode |= O_CREAT;
 		out = open(outfile,mode,0666);
 		if (-1 == out)
 			errormsg("error reopening output file: %s\n",strerror(errno));
@@ -1280,8 +1287,9 @@ static void *outputThread(void *arg)
 #ifdef HAVE_SENDFILE
 			if (sendout) {
 				off_t baddr = (off_t) (Buffer[at] + blocksize - rest);
-				num = sendfile(out,SFV_FD_SELF,&baddr,(size_t)(rest > Outsize ? Outsize : rest));
-				debugiomsg("outputThread: sendfile(%d, SFV_FD_SELF, &(Buffer[%d] + %llu), %llu) = %d\n", out, at, blocksize - rest, rest > Outsize ? Outsize : rest, num);
+				unsigned long long n = SetOutsize ? (rest > Outsize ? (rest/Outsize)*Outsize : rest) : rest;
+				num = sendfile(out,SFV_FD_SELF,&baddr,n);
+				debugiomsg("outputThread: sendfile(%d, SFV_FD_SELF, &(Buffer[%d] + %llu), %llu) = %d\n", out, at, blocksize - rest, n, num);
 				if ((num == -1) && ((errno == EOPNOTSUPP) || (errno == EINVAL))) {
 					infomsg("sendfile not supported - falling back to write...\n");
 					sendout = 0;
@@ -1521,7 +1529,7 @@ static int argcheck(const char *opt, const char **argv, int *c, int argc)
 
 static void addHashAlgorithm(const char *name)
 {
-	const char *algoname;
+	const char *algoname = "";
 	int algo = 0;
 #if HAVE_LIBMHASH
 	int numalgo = mhash_count();
@@ -1557,6 +1565,7 @@ static void addHashAlgorithm(const char *name)
 
 static void openDestinationFiles(dest_t *d)
 {
+	unsigned errs = ErrorOccurred;
 	while (d) {
 		if (d->fd == -1) {
 			if (0 == strncmp(d->arg,"/dev/",5))
@@ -1591,6 +1600,8 @@ static void openDestinationFiles(dest_t *d)
 #endif
 		d = d->next;
 	}
+	if (ErrorOccurred != errs)
+		fatal("unable to open all outputs\n");
 }
 
 int main(int argc, const char **argv)
@@ -1645,10 +1656,10 @@ int main(int argc, const char **argv)
 			if (Blocksize < 100)
 				fatal("cannot set blocksize as percentage of total physical memory\n");
 		} else if (!strcmp("--append",argv[c])) {
-			optMode = O_APPEND;
+			optMode |= O_APPEND;
 			debugmsg("append to next file\n");
 		} else if (!strcmp("--truncate",argv[c])) {
-			optMode = O_TRUNC;
+			optMode |= O_TRUNC;
 			debugmsg("truncate next file\n");
 		} else if (!argcheck("-m",argv,&c,argc)) {
 			totalmem = calcint(argv,c,totalmem);
@@ -1744,7 +1755,7 @@ int main(int argc, const char **argv)
 				dest->name = "<stdout>";
 				dest->mode = 0;
 			}
-			optMode = Nooverwrite;
+			optMode = O_EXCL;
 			dest->port = 0;
 			dest->result = 0;
 			bzero(&dest->thread,sizeof(dest->thread));
@@ -1792,8 +1803,8 @@ int main(int argc, const char **argv)
 			}
 			debugmsg("logFile set to %s\n",argv[c]);
 		} else if (!strcmp("-f",argv[c])) {
-			Nooverwrite = 0;
-			debugmsg("Nooverwrite = 0\n");
+			optMode &= ~O_EXCL;
+			debugmsg("overwrite = 1\n");
 		} else if (!strcmp("-q",argv[c])) {
 			debugmsg("disabling display of status\n");
 			Status = 0;
@@ -1959,6 +1970,8 @@ int main(int argc, const char **argv)
 		warningmsg("unable to determine maximum value of semaphores\n");
 #endif
 	}
+	if (Numblocks < 5)
+		fatal("Minimum block count is 5.\n");
 	if (Numblocks > mxnrsem) {
 		fatal("cannot allocate more than %d blocks.\nThis is a system dependent limit, depending on the maximum semaphore value.\nPlease choose a bigger block size.\n",mxnrsem);
 	}
@@ -2035,7 +2048,7 @@ int main(int argc, const char **argv)
 	debugmsg("creating semaphores...\n");
 	if (0 != sem_init(&Buf2Dev,0,0))
 		fatal("Error creating semaphore Buf2Dev: %s\n",strerror(errno));
-	if (0 != sem_init(&Dev2Buf,0, Numblocks))
+	if (0 != sem_init(&Dev2Buf,0,Numblocks))
 		fatal("Error creating semaphore Dev2Buf: %s\n",strerror(errno));
 
 	debugmsg("opening input...\n");
