@@ -58,14 +58,6 @@ typedef int caddr_t;
 #ifdef HAVE_SENDFILE_H
 #include <sys/sendfile.h>
 #endif
-/* if this sendfile implementation does not support sending from buffers,
-   disable sendfile support */
-	#ifndef SFV_FD_SELF
-	#ifdef __GNUC__
-	#warning sendfile is unable to send from buffers
-	#endif
-	#undef HAVE_SENDFILE
-	#endif
 #endif
 
 #ifndef EBADRQC
@@ -121,6 +113,15 @@ static MD5_CTX MD5ctxt;
 #include "dest.h"
 #include "network.h"
 #include "log.h"
+
+/* if this sendfile implementation does not support sending from buffers,
+   disable sendfile support */
+	#ifndef SFV_FD_SELF
+	#ifdef __GNUC__
+	#warning sendfile is unable to send from buffers
+	#endif
+	#undef HAVE_SENDFILE
+	#endif
 
 char
 	*Prefix;
@@ -1349,7 +1350,7 @@ static void *outputThread(void *arg)
 static void version(void)
 {
 	(void) fprintf(stderr,
-		"mbuffer version "VERSION"\n"\
+		"mbuffer version "PACKAGE_VERSION"\n"\
 		"Copyright 2001-2014 - T. Maier-Komor\n"\
 		"License: GPLv3 - see file LICENSE\n"\
 		"This program comes with ABSOLUTELY NO WARRANTY!!!\n"
@@ -1415,6 +1416,8 @@ static void usage(void)
 		"-H\n"
 		"--md5      : generate md5 hash of transfered data\n"
 		"--hash <a> : use alogritm <a>, if <a> is 'list' possible algorithms are listed\n"
+		"--pid      : print PID of this instance\n"
+		"-W <time>  : set watchdog timeout to <time> seconds\n"
 #endif
 		"-4         : force use of IPv4\n"
 		"-6         : force use of IPv6\n"
@@ -1654,7 +1657,12 @@ static const char *calcval(const char *arg, unsigned long long *res)
 
 static void initDefaults()
 {
-	char dfname[PATH_MAX+1], line[256];
+#ifdef PATH_MAX
+	char dfname[PATH_MAX+1];
+#else
+	char dfname[1024];
+#endif
+	char line[256];
 	const char *home = getenv("HOME");
 	size_t l;
 	int df;
@@ -1665,7 +1673,7 @@ static void initDefaults()
 		warningmsg("HOME environment variable not set - unable to find defaults file\n");
 		return;
 	}
-	strncpy(dfname,home,PATH_MAX);
+	strncpy(dfname,home,sizeof(dfname)-1);
 	dfname[sizeof(dfname)-1] = 0;
 	l = strlen(dfname);
 	if (l + 12 > PATH_MAX) {
@@ -1784,6 +1792,13 @@ static void initDefaults()
 			} else if ((strcasecmp(valuestr,"no") == 0) || (strcasecmp(valuestr,"off") == 0) || (strcmp(valuestr,"0") == 0)) {
 				Memlock = 0;
 				debugmsg("Memlock = %lu\n",Memlock);
+			} else 
+				warningmsg("invalid argument for %s: \"%s\"\n",key,valuestr);
+			continue;
+		} else if (strcasecmp(key,"printpid") == 0) {
+			if ((strcasecmp(valuestr,"yes") == 0) || (strcasecmp(valuestr,"on") == 0) || (strcmp(valuestr,"1") == 0)) {
+				printmsg("PID is %d\n",getpid());
+			} else if ((strcasecmp(valuestr,"no") == 0) || (strcasecmp(valuestr,"off") == 0) || (strcmp(valuestr,"0") == 0)) {
 			} else 
 				warningmsg("invalid argument for %s: \"%s\"\n",key,valuestr);
 			continue;
@@ -2128,6 +2143,8 @@ int main(int argc, const char **argv)
 			fatal("hash calculation support has not been compiled in!\n");
 #endif
 			addHashAlgorithm(argv[c]);
+		} else if (!strcmp("--pid",argv[c])) {
+			printmsg("PID is %d\n",getpid());
 		} else if (!argcheck("-D",argv,&c,argc)) {
 			OutVolsize = calcint(argv,c,0);
 			debugmsg("OutVolsize = %llu\n",OutVolsize);
@@ -2160,7 +2177,7 @@ int main(int argc, const char **argv)
 		fatal("multi-volume support is unsupported with multiple outputs\n");
 	if (Autoloader) {
 		if ((!outfile) && (!Infile))
-			fatal("Setting autoloader time without using a device doesn't make any sense!\n");
+			fatal("Setting autoloader time or command without using a device doesn't make any sense!\n");
 		if (outfile && Infile) {
 			fatal("Which one is your autoloader? Input or output? Replace input or output with a pipe.\n");
 		}
@@ -2336,7 +2353,7 @@ int main(int argc, const char **argv)
 		int tty = open("/dev/tty",O_RDWR);
 		if (-1 == tty) {
 			Terminal = 0;
-			if (Autoloader == 0)
+			if ((Autoloader == 0) && (outfile))
 				warningmsg("No controlling terminal and no autoloader command specified.\n");
 		} else {
 			Terminal = 1;

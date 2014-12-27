@@ -1,3 +1,10 @@
+20141227:
+- added option --pid to print PID of current process
+- updated usage to include option -W
+- man page formatting fixes
+- configure updates
+- support compiling on systems that do not define PATH_MAX
+
 20140310:
 - added memory advise for buffer memory
 - compatibility fix for Solars st driver
