@@ -126,7 +126,7 @@ static MD5_CTX MD5ctxt;
 char
 	*Prefix;
 int 
-	In = -1;
+	In = -1, WatchdogRaised = 0;
 size_t
 	PrefixLen = 0;
 
@@ -355,10 +355,12 @@ static void *watchdogThread(void *ignored)
 		sleep(Timeout);
 		if ((ni == Numin) && (Finish == -1)) {
 			errormsg("watchdog timeout: input stalled; sending SIGINT\n");
+			WatchdogRaised = 1;
 			kill(getpid(),SIGINT);
 		}
 		if (no == Numout) {
 			errormsg("watchdog timeout: output stalled; sending SIGINT\n");
+			WatchdogRaised = 1;
 			kill(getpid(),SIGINT);
 		}
 		ni = Numin;
@@ -2344,6 +2346,8 @@ int main(int argc, const char **argv)
 
 	debugmsg("checking if we have a controlling terminal...\n");
 	sig.sa_handler = SIG_IGN;
+	sigemptyset(&sig.sa_mask);
+	sig.sa_flags = 0;
 	err = sigaction(SIGTTIN,&sig,0);
 	assert(err == 0);
 	fl = fcntl(STDERR_FILENO,F_GETFL);
@@ -2475,10 +2479,6 @@ int main(int argc, const char **argv)
 			err = read(TermQ[0],&null,1);
 			assert(err == 1);
 		}
-	}
-	if (Timeout) {
-		err = pthread_cancel(Watchdog);
-		assert(err == 0);
 	}
 	if (Dest) {
 		dest_t *d = Dest;

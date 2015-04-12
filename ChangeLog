@@ -1,3 +1,7 @@
+20150412:
+- fix: watchdog cannot do its job if it is cleaned up to early
+- fix: clear sa_flags and sa_mask before use, although ignored
+
 20141227:
 - added option --pid to print PID of current process
 - updated usage to include option -W

@@ -1,4 +1,4 @@
-AC_INIT([mbuffer],[20141227])
+AC_INIT([mbuffer],[20150412])
 AC_CONFIG_HEADER([config.h])
 AC_CONFIG_SRCDIR([mbuffer.c])
 
